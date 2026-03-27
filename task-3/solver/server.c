@@ -30,6 +30,7 @@
 /* ─── Cell markers ────────────────────────────────────────────────────────── */
 #define CELL_EMPTY   '.'
 #define CELL_HIT     'X'
+#define CELL_MISS    '~'
 
 /* ─── Structures ──────────────────────────────────────────────────────────── */
 typedef struct {
@@ -402,6 +403,7 @@ static void process_fire(int shooter_pid) {
                     }
                 }
                 /* Miss */
+                target->hit_board[r][c] = CELL_MISS;
                 sm += snprintf(server_log + sm, sizeof(server_log) - sm,
                                "  - %s: MISS\n", coords[i]);
                 rm += snprintf(result_msg + rm, sizeof(result_msg) - rm,
@@ -469,8 +471,9 @@ static void build_turn_msg(int pid, char *out, size_t osz) {
     for (int r = 0; r < ROWS; r++) {
         for (int c = 0; c < COLS; c++) {
             char cell = p->board[r][c];
-            /* If this tile was hit by opponent, show X */
+            /* If this tile was hit by opponent, show X. If missed, show ~ */
             if (p->hit_board[r][c] == CELL_HIT) cell = CELL_HIT;
+            else if (p->hit_board[r][c] == CELL_MISS) cell = CELL_MISS;
             out[n++] = cell;
         }
     }

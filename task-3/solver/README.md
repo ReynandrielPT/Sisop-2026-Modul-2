@@ -276,8 +276,10 @@ for (int si = 0; si < target->num_ships; si++) {
             ts->hits++;
             target->hit_board[r][c] = CELL_HIT;
             // ...
+        // ... (diluar loop if miss):
+        target->hit_board[r][c] = CELL_MISS;
 ```
-Sementara itu dari kubu Game Master, matriks pertempuran diiterasi penuh satu per satu di setiap koordinat kapal musuh `target->ships[si]`. Koordinat yang bertubrukan persis mendarat dan mengekstrak _Cell Value_ menjadi simbol `CELL_HIT`. Data _health pool_ `ts->hits++` akan dikalkulasikan apabila nilai benturannya sama persis menyentuh `ts->size`, yang maka mentransfer status _ship structure_ menjadi _SUNK_ / tenggelam.
+Sementara itu dari kubu Game Master, matriks pertempuran diiterasi penuh satu per satu di setiap koordinat kapal musuh `target->ships[si]`. Koordinat yang bertubrukan persis mendarat dan mengekstrak _Cell Value_ menjadi simbol `CELL_HIT`. Sebaliknya, jika tembakan jatuh ke lautan kosong, data `CELL_MISS` (berupa penanda `~`) diabadikan dalam `target->hit_board`. Data _health pool_ `ts->hits++` akan dikalkulasikan apabila nilai benturannya sama persis menyentuh `ts->size`, yang mentransfer status _ship structure_ menjadi _SUNK_ / tenggelam. Klien secara langsung menterjemahkan matriks `~` ini menampilkan proyektil musuh yang mendarat meleset di area tak berkapal.
 
 ### Foto Hasil Output
 *(Terlampir foto prompt output "Jumlah shot terlalu banyak!" dan skenario pengguliran bergantian antara terminal Player 1 dan 2 dalam mengeksplor tebakan-tebakan HIT dan MISS)*

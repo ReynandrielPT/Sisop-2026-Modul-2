@@ -62,7 +62,8 @@ Keterangan:
 - `D` : Kapal Perusak milik pemain
 - `C` : Kapal Penjelajah milik pemain
 - `X` : Tembakan mengenai sasaran (hit)
-- ` ` : Petak kosong atau tembakan meleset (miss, tidak meninggalkan tanda)
+- `~` : Tembakan musuh (maupun pemain sendiri) meleset (miss) jatuh di laut
+- ` ` : Petak kosong yang belum tertembak
 - `?` : Petak lawan yang belum ditembak (unknown)
 
 ---
@@ -859,7 +860,7 @@ Cruiser placed.
     Your Board
   A B C D E
 0|D|D| | | |
-1| | | | | |
+1| |~| | | |
 2| | |C|C|C|
 3| | | | | |
 4| | | | | |
@@ -922,7 +923,7 @@ Submarine 2 placed.
 0|X|S| | | |
 1| | | | | |
 2| | | |S| |
-3| | | |S| |
+3| | | |S|~|
 4| | | | | |
 
 Ship status:
