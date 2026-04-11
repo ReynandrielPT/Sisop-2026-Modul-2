@@ -1,4 +1,4 @@
-# Task 1 : Tim Biru
+# Task 1 : Tim Biru 
 
 Erlangga sedang mengikuti kompetisi *Capture The Flag* dan bertugas sebagai blue team. Ia baru saja mengunduh sebuah file arsip bernama `evidence.zip` dari server yang di duga telah diretas. File tersebut berisi ratusan log aktivitas jaringan dan dump lalu lintas data.
 
@@ -39,7 +39,7 @@ logs_dump/
 
 ## c. The Watcher
 
-Erlangga curiga bahwa penyerang menanamkan backdoor pada sistem, dan mengirimkan file berbahaya berekstensi `.exe dan .pcap` ke dalam direktori bernama `honeypot/`. Mengawasi folder tersebut secara manual sangatlah melelahkan, apalagi jika file-file tersebut terus bertambah.
+Erlangga curiga bahwa penyerang menanamkan backdoor pada sistem, dan mengirimkan file berbahaya berekstensi `.exe` dan `.pcap` ke dalam direktori bernama `honeypot/`. Mengawasi folder tersebut secara manual sangatlah melelahkan, apalagi jika file-file tersebut terus bertambah.
 
 Oleh karena itu, bantulah Erlangga dengan membuat Daemon bernama `watcher.c` dengan ketentuan : 
 
@@ -47,7 +47,7 @@ Oleh karena itu, bantulah Erlangga dengan membuat Daemon bernama `watcher.c` den
 - Daemon harus cek folder `honeypot/` secara berkala setiap 1 detik.  
 - Jika menemukan file dengan ekstensi diatas, Daemon harus memindahkan file tersebut ke folder `quarantine/.`  
 - Daemon menyimpan PID nya diri sendiri ke file bernama `watcher.pid` saat di jalankan.  
-- Setiap kali Daemon menemukan dan memindahkan file, ia harus mencatat aktivitas tersebut ke dalam file `security.log` (file ini di luar folder honeypot & quarantine).
+- Setiap kali Daemon menemukan dan memindahkan file, ia harus mencatat aktivitas tersebut ke dalam file `security.log`.
 
 Untuk menghentikan daemon gunakan perintah :   
 ```
