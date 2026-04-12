@@ -1,8 +1,8 @@
 # Task 2 (DEANND'S Adventure)
 
-Dono, Enzy, Aini, Nichsaw, Nidji, dan Dodot (DEANND) adalah segerombolan mahasiswa yang suka sekali berpergian. Kali ini, mereka merencanakan untuk berpergian ke kota Zimby. Karena kesibukan mereka masing-masing, mereka baru bisa berangkat saat dini hari. Rencana berpergian pun dibuat serapi dan sedetail mungkin agar petualangan kali ini dapat memberikan kenangan yang tak terlupakan.
+Dustin, Eli, Anindya, Nicho, Nixon, Darryl (DEANND) adalah segerombolan mahasiswa yang suka sekali berpergian. Kali ini, mereka merencanakan untuk berpergian ke kota Zimby. Karena kesibukan mereka masing-masing, mereka baru bisa berangkat saat dini hari. Rencana berpergian pun dibuat serapi dan sedetail mungkin agar petualangan kali ini dapat memberikan kenangan yang tak terlupakan.
 
-Hari keberangkatan pun akhirnya tiba. DEANND berkumpul terlebih dahulu di kos Dodot. Perjalanan ke kota Zimby membutuhkan waktu sekitar 50 jam. Sesampainya di kota Zimby, DEANND langsung mengeluh. Hal ini dikarenakan kota Zimby sangatlah macet sehingga petualangan DEANND menjadi terhambat. Untuk mengatasi masalah tersebut, Dono yang cerdas memiliki ide untuk mengembangkan sistem cerdas bernama Smart Traffic Controller (STC).
+Hari keberangkatan pun akhirnya tiba. DEANND berkumpul terlebih dahulu di kos Darryl. Perjalanan ke kota Zimby membutuhkan waktu sekitar 50 jam. Sesampainya di kota Zimby, DEANND langsung mengeluh. Hal ini dikarenakan kota Zimby sangatlah macet sehingga petualangan DEANND menjadi terhambat. Untuk mengatasi masalah tersebut, Dono yang cerdas memiliki ide untuk mengembangkan sistem cerdas bernama Smart Traffic Controller (STC).
 
 Sistem ini terdiri dari:
 - Traffic Control Center (server) sebagai pusat pengendali
