@@ -26,7 +26,7 @@ Jalankan player di terminal kedua dan ketiga:
 
 ## a. Persiapan Koneksi dan Antrean Pesan _(Connection Setup and Message Queues)_
 ### Soal
-Buatlah program `server.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif. Server harus membuat dan mengelola **4 POSIX Message Queue** untuk komunikasi dua arah antara server dan masing-masing pemain. Player dijalankan sederhana tanpa argumen tambahan: `./player`. Program pertama yang terhubung akan ditugaskan sebagai Player 1, dan yang kedua sebagai Player 2.
+Buatlah program `server.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif. Server harus membuat dan mengelola **POSIX Message Queue** untuk komunikasi. Dibutuhkan 1 queue publik untuk menerima koneksi pemain baru dan **4 queue privat** untuk komunikasi dua arah saat gameplay: 2 queue untuk menerima pesan dari setiap pemain, dan 2 queue untuk mengirimkan respons ke setiap pemain. Player dijalankan sederhana tanpa argumen tambahan: `./player`. Program pertama yang terhubung akan ditugaskan sebagai Player 1, dan yang kedua sebagai Player 2.
 
 ### Penyelesaian
 - Code Lengkap (server.c bagian koneksi):
@@ -281,12 +281,32 @@ static void setup_player(int pid) {
 
 - Code Lengkap (player.c bagian penempatan):
 ```c
+/* Show initial empty boards */
+printf("    Papan Lawan\n");
+printf("  A B C D\n");
+for (int r = 0; r < 4; r++) {
+    printf("%d|", r);
+    for (int c = 0; c < 4; c++)
+        printf("?|");
+    printf("\n");
+}
+printf("\n");
+printf("    Papan Anda\n");
+printf("  A B C D\n");
+for (int r = 0; r < 4; r++) {
+    printf("%d|", r);
+    for (int c = 0; c < 4; c++)
+        printf(" |");
+    printf("\n");
+}
+printf("\n");
+
 printf("Anda akan menempatkan 2 kapal (masing-masing 1 petak).\n\n");
 
 char input[100];
 for (int i = 1; i <= 2; i++) {
     while (1) {
-        printf("Tempatkan Kapal %d (cth: 0A):\n> ", i);
+        printf("Tempatkan Kapal %d:\n> ", i);
         fgets(input, sizeof(input), stdin);
         remove_newline(input);
 
@@ -354,7 +374,7 @@ Player membaca input dari `stdin` menggunakan `fgets()`, membentuk pesan `"PLACE
 
 ## c. Giliran Bermain dan Penembakan _(Turn System and Firing)_
 ### Soal
-Setelah setup selesai, server menentukan pemain pertama secara acak. Setiap giliran, pemain melihat papan lawan (atas) dan papan sendiri (bawah), lalu mengetikkan koordinat target. Server memproses hasil tembakan dan mengirimkan notifikasi ke kedua pemain.
+Setelah setup selesai, server menentukan pemain pertama secara acak. Setiap giliran, pemain melihat papan lawan (atas) dan papan sendiri (bawah), lalu mengetikkan koordinat target. Server memproses hasil tembakan dan mengirimkan notifikasi ke kedua pemain. Pemain dapat menembak petak yang sebelumnya sudah pernah ditembak, namun hasilnya selalu dianggap `MELESET`.
 
 ### Penyelesaian
 - Code Lengkap (server.c bagian penembakan):
@@ -379,7 +399,10 @@ static void process_fire(int shooter_pid) {
         }
 
         int hit = 0, sunk = 0;
-        if (target->board[r][c] == CELL_SHIP) {
+        /* Already shot — always miss */
+        if (target->hit_board[r][c] == CELL_HIT || target->hit_board[r][c] == CELL_MISS) {
+            hit = 0;
+        } else if (target->board[r][c] == CELL_SHIP) {
             hit = 1;
             target->hit_board[r][c] = CELL_HIT;
             for (int i = 0; i < target->num_ships; i++) {
@@ -396,13 +419,17 @@ static void process_fire(int shooter_pid) {
 
         printf("[GILIRAN] Pemain %d menembak %s: %s\n", shooter_pid + 1, coord_str, hit ? "KENA" : "MELESET");
         if (sunk)
-            printf("  [TENGGELAM] Pemain %d menenggelamkan Kapal Pemain %d!\n", shooter_pid + 1, target_pid + 1);
+            printf("[TENGGELAM] Pemain %d menenggelamkan Kapal Pemain %d!\n", shooter_pid + 1, target_pid + 1);
 
         char res_msg[MSG_SIZE];
         if (hit)
             snprintf(res_msg, MSG_SIZE, "FIRE_RES %s KENA KAPAL, SISA %d KAPAL LAGI", coord_str, target->ships_remaining);
         else
             snprintf(res_msg, MSG_SIZE, "FIRE_RES %s MELESET, SISA %d KAPAL LAGI", coord_str, target->ships_remaining);
+
+        snprintf(pending_opp_msg[target_pid], MSG_SIZE, "OPP_FIRE %s: %s, SISA %d KAPAL LAGI",
+                 coord_str, hit ? "KENA KAPAL" : "MELESET", target->ships_remaining);
+        has_pending_opp_msg[target_pid] = 1;
         srv_send(shooter_pid, res_msg);
         return;
     }
@@ -415,6 +442,13 @@ static void run_game(void) {
 
     while (1) {
         int other = 1 - current;
+
+        if (has_pending_opp_msg[current]) {
+            srv_send(current, pending_opp_msg[current]);
+            has_pending_opp_msg[current] = 0;
+            usleep(50000);
+        }
+
         build_turn_msg(current, turn_msg, sizeof(turn_msg));
         srv_send(current, turn_msg);
         snprintf(wait_msg, sizeof(wait_msg), "WAIT Pemain %d sedang bermain...", current + 1);
@@ -445,7 +479,7 @@ while (!game_over) {
         if (is_turn && strlen(input) > 0) {
             pthread_mutex_lock(&console_mutex);
             if (strlen(input) < 2) {
-                 printf("Format tidak valid!\nTarget (cth: 0A): ");
+                 printf("Format tidak valid!\nTarget: ");
                  fflush(stdout);
                  pthread_mutex_unlock(&console_mutex);
                  continue;
@@ -472,6 +506,13 @@ build_turn_msg(current, turn_msg, sizeof(turn_msg));
 srv_send(current, turn_msg);
 ```
 Fungsi `build_turn_msg()` menyusun string yang berisi data papan pemain sendiri dan papan lawan. String ini dikirim ke player yang sedang mendapat giliran. Player kemudian mem-*parse* string ini untuk menampilkan kedua papan di terminal.
+
+```c
+if (target->hit_board[r][c] == CELL_HIT || target->hit_board[r][c] == CELL_MISS) {
+    hit = 0;
+}
+```
+Sebelum memproses tembakan baru, server mengecek apakah petak sudah pernah ditembak sebelumnya. Jika `hit_board` sudah berisi `CELL_HIT` atau `CELL_MISS`, tembakan ulang selalu dianggap meleset (`hit = 0`) tanpa mengubah state papan. Ini mencegah pemain mendapat hasil "KENA" pada kapal yang sudah tenggelam.
 
 ```c
 if (target->board[r][c] == CELL_SHIP) {
@@ -507,6 +548,22 @@ if (players[other].ships_remaining == 0) {
 Setiap selesai memproses tembakan, server mengecek apakah semua kapal lawan sudah tenggelam. Jika `ships_remaining == 0`, server mengirim pesan kemenangan ke penembak dan kekalahan ke lawan, lalu keluar dari game loop.
 
 ```c
+snprintf(pending_opp_msg[target_pid], MSG_SIZE, "OPP_FIRE %s: %s, SISA %d KAPAL LAGI",
+         coord_str, hit ? "KENA KAPAL" : "MELESET", target->ships_remaining);
+has_pending_opp_msg[target_pid] = 1;
+```
+Setelah memproses tembakan, server menyimpan pesan notifikasi untuk lawan di buffer `pending_opp_msg`. Pesan ini tidak langsung dikirim — server menggunakan mekanisme *deferred delivery* agar pesan `OPP_FIRE` dikirim di awal giliran berikutnya milik lawan. Flag `has_pending_opp_msg` menandai bahwa ada pesan tertunda.
+
+```c
+if (has_pending_opp_msg[current]) {
+    srv_send(current, pending_opp_msg[current]);
+    has_pending_opp_msg[current] = 0;
+    usleep(50000);
+}
+```
+Di awal setiap giliran dalam `run_game()`, server mengecek apakah ada pesan `OPP_FIRE` tertunda untuk pemain yang akan bermain. Jika ada, pesan dikirim terlebih dahulu sebelum data papan. `usleep(50000)` memberi jeda 50ms agar pesan tercetak berurutan di terminal player.
+
+```c
 // Di player.c:
 snprintf(fire_cmd, sizeof(fire_cmd), "FIRE %s", input);
 mq_send(mq_out, fire_cmd, strlen(fire_cmd)+1, 0);
@@ -519,6 +576,24 @@ Player membentuk pesan `"FIRE 2C"` dari input pengguna dan mengirimnya ke server
 ## d. Pengelolaan Thread, Akhir Permainan, dan Pembersihan _(Thread Management, End of Game, and Cleanup)_
 ### Soal
 Program `player.c` harus menggunakan **thread** dan **mutex** untuk mengelola komunikasi secara bersamaan. Thread utama menangani input, thread terpisah mendengarkan pesan dari server. Mutex melindungi tampilan terminal agar tidak rusak akibat dua thread mencetak bersamaan.
+
+Permainan berakhir ketika semua kapal milik salah satu pemain berhasil ditenggelamkan. Server mengirimkan pesan kemenangan dan kekalahan ke masing-masing pemain.
+
+Pemenang:
+```text
+========================================
+[HASIL] Semua kapal musuh telah tenggelam!
+[HASIL] ANDA MENANG!
+========================================
+```
+
+Yang kalah:
+```text
+========================================
+[HASIL] Semua kapal Anda telah tenggelam.
+[HASIL] ANDA KALAH.
+========================================
+```
 
 ### Penyelesaian
 - Code Lengkap (player.c bagian threading):
@@ -543,12 +618,12 @@ void* listener_thread(void* arg) {
                 printf("\n========================================\n");
                 printf("[GILIRAN ANDA]\n\n");
                 // ... render papan lawan dan papan sendiri ...
-                printf("Target (cth: 0A): ");
+                printf("Target: ");
                 fflush(stdout);
             }
             else if (strncmp(buf, "FIRE_RES", 8) == 0) {
                 printf("\n[HASIL TEMBAKAN]\n");
-                printf("  %s\n", buf + 9);
+                printf("%s\n", buf + 9);
                 printf("========================================\n");
                 my_turn = 0;
             }

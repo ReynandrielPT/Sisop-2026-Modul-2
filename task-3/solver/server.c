@@ -126,14 +126,6 @@ static void setup_player(int pid) {
             }
         }
     }
-    /* Send board state to player */
-    char board_msg[MSG_SIZE * 4];
-    int bm = 0;
-    bm += snprintf(board_msg + bm, sizeof(board_msg) - bm, "BOARD_INIT ");
-    for (int r = 0; r < ROWS; r++)
-        for (int c = 0; c < COLS; c++)
-            bm += snprintf(board_msg + bm, sizeof(board_msg) - bm, "%c", p->board[r][c]);
-    srv_send(pid, board_msg);
 }
 
 /* ─── Fire processing ────────────────────────────────────────────────────── */
@@ -169,7 +161,10 @@ static void process_fire(int shooter_pid) {
         int hit = 0;
         int sunk = 0;
 
-        if (target->board[r][c] == CELL_SHIP) {
+        /* Already shot — always treat as miss */
+        if (target->hit_board[r][c] == CELL_HIT || target->hit_board[r][c] == CELL_MISS) {
+            hit = 0;
+        } else if (target->board[r][c] == CELL_SHIP) {
             hit = 1;
             target->hit_board[r][c] = CELL_HIT;
             
@@ -188,7 +183,7 @@ static void process_fire(int shooter_pid) {
         /* Server console log */
         printf("[GILIRAN] Pemain %d menembak %s: %s\n", shooter_pid + 1, coord_str, hit ? "KENA" : "MELESET");
         if (sunk) {
-            printf("  [TENGGELAM] Pemain %d menenggelamkan Kapal Pemain %d!\n", shooter_pid + 1, target_pid + 1);
+            printf("[TENGGELAM] Pemain %d menenggelamkan Kapal Pemain %d!\n", shooter_pid + 1, target_pid + 1);
         }
 
         /* Notify shooter */

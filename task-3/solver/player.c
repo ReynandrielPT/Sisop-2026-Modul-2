@@ -82,12 +82,12 @@ void* listener_thread(void* arg) {
                 }
                 printf("\n");
 
-                printf("Target (cth: 0A): ");
+                printf("Target: ");
                 fflush(stdout);
             }
             else if (strncmp(buf, "FIRE_RES", 8) == 0) {
                 printf("\n[HASIL TEMBAKAN]\n");
-                printf("  %s\n", buf + 9);
+                printf("%s\n", buf + 9);
                 printf("========================================\n");
                 my_turn = 0;
             }
@@ -177,13 +177,33 @@ int main(void) {
         printf("[SERVER] Permainan dimulai (4x4 Sederhana)!\n\n");
     }
 
+    /* Show initial empty boards */
+    printf("    Papan Lawan\n");
+    printf("  A B C D\n");
+    for (int r = 0; r < 4; r++) {
+        printf("%d|", r);
+        for (int c = 0; c < 4; c++)
+            printf("?|");
+        printf("\n");
+    }
+    printf("\n");
+    printf("    Papan Anda\n");
+    printf("  A B C D\n");
+    for (int r = 0; r < 4; r++) {
+        printf("%d|", r);
+        for (int c = 0; c < 4; c++)
+            printf(" |");
+        printf("\n");
+    }
+    printf("\n");
+
     /* Fleet Selection / Placement */
     printf("Anda akan menempatkan 2 kapal (masing-masing 1 petak).\n\n");
     
     char input[100];
     for (int i = 1; i <= 2; i++) {
         while (1) {
-            printf("Tempatkan Kapal %d (cth: 0A):\n> ", i);
+            printf("Tempatkan Kapal %d:\n> ", i);
             fgets(input, sizeof(input), stdin);
             remove_newline(input);
             
@@ -203,9 +223,6 @@ int main(void) {
 
     printf("\n[INFO] Menunggu lawan menyelesaikan penempatan...\n");
     mq_receive(mq_in, buf, MSG_SIZE, NULL);
-    if (strncmp(buf, "BOARD_INIT", 10) == 0) {
-        mq_receive(mq_in, buf, MSG_SIZE, NULL); /* Wait for SETUP_DONE */
-    }
     if (strncmp(buf, "SETUP_DONE", 10) == 0) {
         printf("[INFO] Semua pemain siap.\n");
     }
@@ -222,9 +239,9 @@ int main(void) {
 
             if (is_turn && strlen(input) > 0) {
                 pthread_mutex_lock(&console_mutex);
-                /* Ensure it's roughly 2 chars (e.g. 0A) */
+                /* Ensure it's roughly 2 chars */
                 if (strlen(input) < 2) {
-                     printf("Format tidak valid!\nTarget (cth: 0A): ");
+                     printf("Format tidak valid!\nTarget: ");
                      fflush(stdout);
                      pthread_mutex_unlock(&console_mutex);
                      continue;

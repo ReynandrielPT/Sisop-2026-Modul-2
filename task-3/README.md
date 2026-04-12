@@ -50,7 +50,7 @@ Keterangan:
 
 Buatlah program `server.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif.
 
-**Server** harus membuat dan mengelola **4 POSIX Message Queue** untuk komunikasi dua arah antara server dan masing-masing pemain: 2 queue untuk menerima pesan dari setiap pemain, dan 2 queue untuk mengirimkan respons ke setiap pemain.
+**Server** harus membuat dan mengelola **POSIX Message Queue** untuk komunikasi. Dibutuhkan 1 queue publik untuk menerima koneksi pemain baru dan **4 queue privat** untuk komunikasi dua arah saat gameplay: 2 queue untuk menerima pesan dari setiap pemain, dan 2 queue untuk mengirimkan respons ke setiap pemain.
 
 **Player** dijalankan sederhana tanpa argumen tambahan: `./player`. Program pertama yang terhubung akan ditugaskan sebagai Player 1, dan yang kedua sebagai Player 2.
 
@@ -71,15 +71,15 @@ Program akan meminta pemain menempatkan setiap kapal satu per satu dengan memasu
 Contoh sesi penempatan:
 
 ```text
-Tempatkan Kapal 1 (cth: 0A):
+Tempatkan Kapal 1:
 > 0A
 Kapal 1 ditempatkan.
 
-Tempatkan Kapal 2 (cth: 0B):
+Tempatkan Kapal 2:
 > 0A
 Petak sudah ditempati!
 
-Tempatkan Kapal 2 (cth: 0B):
+Tempatkan Kapal 2:
 > 3D
 Kapal 2 ditempatkan.
 ```
@@ -120,12 +120,12 @@ Setiap giliran, program menampilkan papan lawan di bagian atas, papan milik pema
 2| | |S| |
 3| | | | |
 
-Target (cth: 0A): 
+Target: 
 ```
 
 Format perintah tembak hanya membutuhkan koordinat target tembakan.
 ```text
-Target (cth: 0A): 2C
+Target: 2C
 ```
 
 Setelah tembakan dilakukan, server memproses hasilnya dan mengirimkan notifikasi secara berurutan:
@@ -134,26 +134,26 @@ Setelah tembakan dilakukan, server memproses hasilnya dan mengirimkan notifikasi
 
 ```text
 [HASIL TEMBAKAN]
-  2C KENA KAPAL, SISA 1 KAPAL LAGI
+2C KENA KAPAL, SISA 1 KAPAL LAGI
 ========================================
 ```
 
 **2. Pemain lawan** mendapat informasi setelah gilirannya dimulai:
 
 ```text
-[INFO] Lawan menembak 2C
+[INFO] Lawan menembak 2C: KENA KAPAL, SISA 1 KAPAL LAGI
 ```
 
 **3. Terminal server** mencatat seluruh kejadian:
 
 ```text
 [GILIRAN] Pemain 1 menembak 2C: KENA
-  [TENGGELAM] Pemain 1 menenggelamkan Kapal Pemain 2!
+[TENGGELAM] Pemain 1 menenggelamkan Kapal Pemain 2!
 ```
 
 Ketentuan validasi yang dilakukan server:
 - Koordinat tembakan harus berada dalam batas papan (baris `0-3`, kolom `A-D`).
-- Pemain dapat menembak petak yang sebelumnya sudah pernah ditembak (meskipun tidak efektif).
+- Pemain dapat menembak petak yang sebelumnya sudah pernah ditembak, namun hasilnya selalu dianggap `MELESET`.
 - Setiap giliran, pemain hanya dapat menembak satu kali pada satu target koordinat.
 
 ### d. Pengelolaan Thread, Akhir Permainan, dan Pembersihan _(Thread Management, End of Game, and Cleanup)_
@@ -168,10 +168,19 @@ Ketika tembakan lawan mendarat di papan pemain, thread pendengar menampilkan inf
 
 Permainan berakhir ketika semua kapal milik salah satu pemain berhasil ditenggelamkan. Server mengirimkan pesan kemenangan dan kekalahan ke masing-masing pemain.
 
+Pemenang:
 ```text
 ========================================
 [HASIL] Semua kapal musuh telah tenggelam!
 [HASIL] ANDA MENANG!
+========================================
+```
+
+Yang kalah:
+```text
+========================================
+[HASIL] Semua kapal Anda telah tenggelam.
+[HASIL] ANDA KALAH.
 ========================================
 ```
 
@@ -210,7 +219,7 @@ gcc player.c -o player -lrt -lpthread
 [GILIRAN] Pemain 1 menembak 0A: KENA
 [GILIRAN] Pemain 2 menembak 1B: MELESET
 [GILIRAN] Pemain 1 menembak 3D: KENA
-  [TENGGELAM] Pemain 1 menenggelamkan Kapal Pemain 2!
+[TENGGELAM] Pemain 1 menenggelamkan Kapal Pemain 2!
 ...
 [SERVER] Pemain 1 menang!
 [SERVER] Pembersihan selesai. Sampai jumpa.
@@ -223,12 +232,26 @@ gcc player.c -o player -lrt -lpthread
 [SERVER] Menunggu Pemain 2 untuk bergabung...
 [SERVER] Permainan dimulai (4x4 Sederhana)!
 
+    Papan Lawan
+  A B C D
+0|?|?|?|?|
+1|?|?|?|?|
+2|?|?|?|?|
+3|?|?|?|?|
+
+    Papan Anda
+  A B C D
+0| | | | |
+1| | | | |
+2| | | | |
+3| | | | |
+
 Anda akan menempatkan 2 kapal (masing-masing 1 petak).
 
-Tempatkan Kapal 1 (cth: 0A):
+Tempatkan Kapal 1:
 > 0A
 Kapal 1 ditempatkan.
-Tempatkan Kapal 2 (cth: 0B):
+Tempatkan Kapal 2:
 > 2B
 Kapal 2 ditempatkan.
 
@@ -252,10 +275,10 @@ Kapal 2 ditempatkan.
 2| |S| | |
 3| | | | |
 
-Target (cth: 0A): 1A
+Target: 1A
 
 [HASIL TEMBAKAN]
-  1A MELESET, SISA 2 KAPAL LAGI
+1A MELESET, SISA 2 KAPAL LAGI
 ========================================
 ...
 [HASIL] Semua kapal musuh telah tenggelam!
@@ -287,14 +310,14 @@ Each player automatically gets exactly **2 Ships**. Each ship is exactly **1 til
 Each turn, the active player sees the **enemy board on top** and their **own board below** (closer to the input prompt).
 
 ```text
-    Enemy Board
+    Papan Lawan
   A B C D
 0|?|?|?|?|
 1|?|X|?|?|
 2|?|?| |?|
 3| |?|?|?|
 
-    Your Board
+    Papan Anda
   A B C D
 0|S| | | |
 1| | | | |
@@ -316,38 +339,38 @@ Legend:
 
 Create a `server.c` program that acts as the **Game Master** and a `player.c` program as the interactive player client.
 
-The **server** must create and manage **4 POSIX Message Queues** for bidirectional communication: 2 queues to receive messages from each player, and 2 queues to send responses back to each player.
+The **server** must create and manage **POSIX Message Queues** for communication. This includes 1 public queue to accept player connections and **4 private queues** for bidirectional gameplay communication: 2 queues to receive messages from each player, and 2 queues to send responses back to each player.
 
 To launch the **Player** client, simply run `./player` without arguments. The first process to connect successfully will be automatically assigned as Player 1, and the second as Player 2.
 
 When the first player connects, they wait until the second player joins. During this wait the program displays:
 
 ```text
-[SERVER] Waiting for Player 2 to connect...
+[SERVER] Menunggu Pemain 2 untuk bergabung...
 ```
 
 Once both players are connected, the server signals that the game is ready to begin.
 
 ### b. Fleet Placement
 
-After both players are connected, each player independently places their 2 ships.
+After both players are connected, each player places their 2 ships.
 
 The program prompts the player to place each ship one at a time by entering a single tile coordinate.
 
 Example placement session:
 
 ```text
-Place Ship 1 (e.g. 0A):
+Tempatkan Kapal 1:
 > 0A
-Ship 1 placed.
+Kapal 1 ditempatkan.
 
-Place Ship 2 (e.g. 0B):
+Tempatkan Kapal 2:
 > 0A
-Tile is already occupied!
+Petak sudah ditempati!
 
-Place Ship 2 (e.g. 0B):
+Tempatkan Kapal 2:
 > 3D
-Ship 2 placed.
+Kapal 2 ditempatkan.
 ```
 
 Placement validation rules:
@@ -357,7 +380,7 @@ Placement validation rules:
 Once a player finishes placing all ships, the program displays:
 
 ```text
-[INFO] Waiting for opponent to finish placement...
+[INFO] Menunggu lawan menyelesaikan penempatan...
 ```
 
 The game starts only after both players have completed their fleet setup.
@@ -370,28 +393,28 @@ Each turn, the program displays the **enemy board on top**, the **player's own b
 
 ```text
 ========================================
-[YOUR TURN]
+[GILIRAN ANDA]
 
-    Enemy Board
+    Papan Lawan
   A B C D
 0|?|?|?|?|
 1|?|X|?|?|
 2|?|?| |?|
 3| |?|?|?|
 
-    Your Board
+    Papan Anda
   A B C D
 0|S| | | |
 1| | | | |
 2| | |S| |
 3| | | | |
 
-Target (e.g., 0A): 
+Target: 
 ```
 
 The player enters exactly 1 coordinate to strike.
 ```text
-Target (e.g., 0A): 2C
+Target: 2C
 ```
 
 After the shot is fired, the server processes the results and sends notifications:
@@ -399,27 +422,27 @@ After the shot is fired, the server processes the results and sends notification
 **1. The shooting player** receives the result at the end of their turn:
 
 ```text
-[SHOT RESULT]
-  2C HIT A SHIP, 1 MORE SHIP LEFT
+[HASIL TEMBAKAN]
+2C KENA KAPAL, SISA 1 KAPAL LAGI
 ========================================
 ```
 
 **2. The opponent** is informed at the start of the opponent's turn:
 
 ```text
-[INFO] Opponent fired at 2C
+[INFO] Lawan menembak 2C: KENA KAPAL, SISA 1 KAPAL LAGI
 ```
 
 **3. The server terminal** logs the event:
 
 ```text
-[TURN] Player 1 fired at 2C: HIT
-  [SUNK] Player 1 sank Player 2's Ship!
+[GILIRAN] Pemain 1 menembak 2C: KENA
+[TENGGELAM] Pemain 1 menenggelamkan Kapal Pemain 2!
 ```
 
 Validation rules enforced by the server:
 - Target coordinates must be within the grid (rows `0-3`, columns `A-D`).
-- Players may shoot at tiles that have already been targeted before.
+- Players may shoot at tiles that have already been targeted before, but the result is always treated as a `MISS`.
 - Each turn allows only one target coordinate.
 
 ### d. Thread Management, End of Game, and Cleanup
@@ -432,12 +455,21 @@ The `player.c` program must use **threads** and **mutex** for concurrent communi
 
 When an opponent's shot lands on the player's grid, the listener thread immediately displays the event.
 
-The game ends when all ships belonging to one player have been sunk.
+The game ends when all ships belonging to one player have been sunk. The server sends the appropriate message to each player.
 
+Winner:
 ```text
 ========================================
-[RESULT] All enemy ships have been sunk!
-[RESULT] YOU WIN!
+[HASIL] Semua kapal musuh telah tenggelam!
+[HASIL] ANDA MENANG!
+========================================
+```
+
+Loser:
+```text
+========================================
+[HASIL] Semua kapal Anda telah tenggelam.
+[HASIL] ANDA KALAH.
 ========================================
 ```
 
