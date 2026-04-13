@@ -1,4 +1,4 @@
-# Task 2 (DEANND'S Adventure)
+# Task 2 (_DEANND'S Adventure_)
 
 Dustin, Eli, Anindya, Nicho, Nixon, Darryl (DEANND) adalah segerombolan mahasiswa yang suka sekali berpergian. Kali ini, mereka merencanakan untuk berpergian ke kota Zimby. Karena kesibukan mereka masing-masing, mereka baru bisa berangkat saat dini hari. Rencana berpergian pun dibuat serapi dan sedetail mungkin agar petualangan kali ini dapat memberikan kenangan yang tak terlupakan.
 
@@ -44,8 +44,8 @@ Setiap sensor bertugas mengirimkan kondisi lalu lintas dari dua lokasi berbeda:
 5. Proses berulang secara terus-menerus (continuous monitoring)
 6. Sistem berhenti ketika salah satu sensor mengirimkan perintah exit
 
-## Soal (Tasks)
-### a. Setup Koneksi (Connection Setup)
+## Soal (_Tasks_)
+### a. Setup Koneksi (_Connection Setup_)
 
 Pada tahap ini, Anda diminta untuk membuat dua buah program, yaitu `server.c` yang berperan sebagai pusat kontrol sistem, serta `sensor.c` yang berperan sebagai client sensor. Komunikasi antara server dan sensor harus menggunakan mekanisme `Message Queue`. Dalam implementasinya, sistem harus menggunakan dua buah message queue yang berfungsi untuk komunikasi dua arah, yaitu:
 - Satu queue digunakan untuk mengirim data dari sensor ke server.
@@ -61,7 +61,7 @@ Program sensor dijalankan tanpa argumen tambahan. Sensor yang pertama kali dijal
 [SERVER] System ready!
 ```
 
-### b. Input Data Sensor (Input Sensor Data)
+### b. Input Data Sensor (_Input Sensor Data_)
 Setelah kedua sensor berhasil terhubung ke server, masing-masing sensor diminta untuk mengirimkan kondisi traffic dari dua lokasi yang menjadi tanggung jawabnya. Sensor akan berjalan secara berulang (continuous monitoring), di mana pengguna dapat terus memasukkan data kondisi lalu lintas hingga memasukkan perintah untuk berhenti. Setiap data yang dikirim harus dituliskan dalam satu baris dengan format sebagai berikut:
 
 ```
@@ -223,7 +223,7 @@ Run:
 5. Program harus menghindari deadlock serta race condition.
 6. Server wajib melakukan cleanup message queue sebelum keluar.
 
-# Task 2 (DEANND'S Adventure)
+# Task 2 (_DEANND'S Adventure_)
 Dustin, Eli, Anindya, Nicho, Nixon, and Darryl (DEANND) are a group of college students who love to travel. This time, they planned a trip to the city of Zimby. Due to their busy schedules, they couldn't leave until early in the morning. They carefully planned their itinerary to ensure that this adventure would be unforgettable.
 
 The day of departure finally arrived. DEANND gathered first at Darryl's boarding house. The trip to Zimby would take approximately 50 hours. Upon arriving in Zimby, DEANND immediately complained. This was because Zimby was extremely congested, hampering their adventure. To solve this problem, the brilliant Dustin came up with the idea of ​​developing an intelligent system called the Smart Traffic Controller (STC).
@@ -284,7 +284,7 @@ The sensor program is executed without any additional arguments. The first senso
 [SERVER] Sensor 2 connected
 [SERVER] System ready!
 ```
-### b. Input Data Sensor (Input Sensor Data)
+### b. Input Sensor Data
 Once both sensors are successfully connected to the server, each sensor is asked to transmit traffic conditions from its two responsible locations. The sensors will run continuously, allowing the user to continuously input traffic condition data until a stop command is issued. Each transmitted data item must be written on a single line with the following format:
 
 ```
