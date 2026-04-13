@@ -2,13 +2,13 @@
 
 Dustin, Eli, Anindya, Nicho, Nixon, Darryl (DEANND) adalah segerombolan mahasiswa yang suka sekali berpergian. Kali ini, mereka merencanakan untuk berpergian ke kota Zimby. Karena kesibukan mereka masing-masing, mereka baru bisa berangkat saat dini hari. Rencana berpergian pun dibuat serapi dan sedetail mungkin agar petualangan kali ini dapat memberikan kenangan yang tak terlupakan.
 
-Hari keberangkatan pun akhirnya tiba. DEANND berkumpul terlebih dahulu di kos Darryl. Perjalanan ke kota Zimby membutuhkan waktu sekitar 50 jam. Sesampainya di kota Zimby, DEANND langsung mengeluh. Hal ini dikarenakan kota Zimby sangatlah macet sehingga petualangan DEANND menjadi terhambat. Untuk mengatasi masalah tersebut, Dono yang cerdas memiliki ide untuk mengembangkan sistem cerdas bernama Smart Traffic Controller (STC).
+Hari keberangkatan pun akhirnya tiba. DEANND berkumpul terlebih dahulu di kos Darryl. Perjalanan ke kota Zimby membutuhkan waktu sekitar 50 jam. Sesampainya di kota Zimby, DEANND langsung mengeluh. Hal ini dikarenakan kota Zimby sangatlah macet sehingga petualangan DEANND menjadi terhambat. Untuk mengatasi masalah tersebut, Dustin yang cerdas memiliki ide untuk mengembangkan sistem cerdas bernama Smart Traffic Controller (STC).
 
 Sistem ini terdiri dari:
 - Traffic Control Center (server) sebagai pusat pengendali
 - Traffic Sensor Units (client/player) yang ditempatkan di berbagai persimpangan
 
-Setiap sensor akan mengirimkan data kondisi lalu lintas secara real-time, dan pusat akan memberikan instruksi pengaturan lampu lalu lintas. Untuk meningkatkan akurasi, sistem kini memantau beberapa titik strategis kota secara bersamaan menggunakan sensor yang tersebar di berbagai titik lokasi kota Zimby. Disini, kamu ditugaskan untuk membantu Dono membangun sistem komunikasi ini menggunakan interprocess communication (IPC).
+Setiap sensor akan mengirimkan data kondisi lalu lintas secara real-time, dan pusat akan memberikan instruksi pengaturan lampu lalu lintas. Untuk meningkatkan akurasi, sistem kini memantau beberapa titik strategis kota secara bersamaan menggunakan sensor yang tersebar di berbagai titik lokasi kota Zimby. Disini, kamu ditugaskan untuk membantu Darryl membangun sistem komunikasi ini menggunakan interprocess communication (IPC).
 
 ## Deskripsi Sistem (System Description)
 Pada sistem ini akan terdapat 1 Traffic Control Center (server) dan 2 Traffic Sensor Units (client).
@@ -215,3 +215,10 @@ Run:
 ./server
 ./sensor (untuk tiap sensor)
 ```
+
+### Notes
+1. Program WAJIB menggunakan mekanisme IPC Message Queue.
+2. Tidak diperbolehkan menggunakan `system()`.
+3. Program sensor WAJIB menggunakan thread dan mutex.
+5. Program harus menghindari deadlock serta race condition.
+6. Server WAJIB melakukan cleanup message queue sebelum keluar.
