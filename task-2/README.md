@@ -75,7 +75,7 @@ Contoh:
 
 Setiap baris input merepresentasikan satu laporan kondisi lalu lintas dari suatu sensor pada satu lokasi tertentu. Setiap sensor harus mengirimkan tepat dua data per siklus, di mana satu siklus dimulai saat sensor mulai input, dan berakhir setelah dua data valid dikirim ke server. Nilai ID sensor harus sesuai dengan sensor yang sedang berjalan. Lokasi yang dimasukkan harus valid (A, B, C, atau D). Status hanya boleh berupa L atau H. Jika terdapat input yang tidak valid, maka program harus meminta pengguna untuk mengulangi input tersebut. Setelah kedua input dimasukkan, sensor akan mengirimkan seluruh data tersebut ke server. Sistem ini berjalan secara terus-menerus hingga pengguna memasukkan perintah `exit`.
 
-Jika salah satu sensor mengirimkan perintah `exit`, maka sensor tersebut mengirimkan sinyal exit ke server dan berhenti. Server akan menghentikan loop utama setelah menerima sinyal exit. Server tidak perlu menunggu siklus selesai jika data belum lengkap. Server mengirimkan sinyal shutdown ke seluruh sensor lain. Sensor lain yang masih berjalan harus menghentikan prosesnya setelah menerima sinyal tersebut. Berikut adalah tampilan saat `exit`:
+Jika salah satu sensor mengirimkan perintah `exit`, maka sensor tersebut mengirimkan sinyal exit ke server dan berhenti. Server akan menghentikan loop utama setelah menerima sinyal exit. Server tidak perlu menunggu siklus selesai jika data belum lengkap. Server mengirimkan sinyal shutdown ke seluruh sensor lain. Sensor lain yang masih berjalan harus segera menghentikan proses setelah menerima sinyal tersebut. Berikut adalah tampilan saat `exit`:
 
 Server:
 
@@ -138,7 +138,7 @@ Pada program `sensor.c`, komunikasi dengan server harus dilakukan secara bersama
 
 Karena kedua thread dapat mengakses bagian output secara bersamaan, diperlukan penggunaan mutex untuk mencegah terjadinya race condition agar tampilan output tetap rapi dan tidak saling bertabrakan. Sebagai contoh, ketika sensor menerima hasil dari server, program dapat menampilkan:
 ```
-[INFO] Status kota saat ini: PADAT
+[INFO] Current city status: PADAT
 ```
 
 Ketika sensor menerima sinyal shutdown dari server, thread pendengar harus menghentikan loop penerimaan pesan, kemudian seluruh thread pada sensor harus dihentikan, dan program keluar dengan bersih.
