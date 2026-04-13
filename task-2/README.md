@@ -344,6 +344,7 @@ Afterward, the server will perform a calculation process by counting the number 
 #### Handling Conditions (Exit)
 The server must be able to handle the situation where one of the sensors sends an exit signal before all data for a complete cycle has been received. In this situation, the server does not need to wait for the remaining data from the other sensors. The server can immediately stop the main loop. The server initiates a shutdown process and sends a stop signal to all sensors.
 
+### d. Status Determination
 Based on the number of locations experiencing heavy traffic (H), the server will determine the overall city traffic status. Status determination is carried out using the following rules:
 | Number o H | Status |
 | -------- | ----------- |
