@@ -1,14 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mqueue.h>
-#include <fcntl.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <ctype.h>
 
-#define MQ_DATA   "/stc_data"
-#define MQ_STATUS "/stc_status"
-#define MSGSZ    256
+#define MSGSZ 256
 
 #define T_REG  0
 #define T_DATA 1
@@ -17,34 +19,58 @@
 typedef struct {
     int  type;
     int  id;
+    int  pid;
     char loc;
     char st;
 } SensorMsg;
 
 typedef struct {
     int  id;
+    int  pid;
     char status[32];
     int  bye;
 } ServerMsg;
 
-static mqd_t   mq_out, mq_in;
+typedef struct {
+    long mtype;
+    SensorMsg body;
+} DataPacket;
+
+typedef struct {
+    long mtype;
+    ServerMsg body;
+} StatusPacket;
+
+static int     q_data = -1, q_status = -1;
 static int     my_id;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int    done  = 0;
 
+static key_t key_data(void) {
+    return ftok(".", 'D');
+}
+
+static key_t key_status(void) {
+    return ftok(".", 'S');
+}
+
 static void *listener(void *arg) {
     (void)arg;
-    ServerMsg msg;
+    StatusPacket pkt;
 
     while (!done) {
-        memset(&msg, 0, sizeof(msg));
-        if (mq_receive(mq_in, (char *)&msg, MSGSZ, NULL) < 0) {
+        memset(&pkt, 0, sizeof(pkt));
+        if (msgrcv(q_status, &pkt, sizeof(pkt.body), my_id, IPC_NOWAIT) < 0) {
+            if (errno == ENOMSG) {
+                usleep(50000);
+                continue;
+            }
             if (done) break;
             continue;
         }
 
         pthread_mutex_lock(&mutex);
-        if (msg.bye) {
+        if (pkt.body.bye) {
             done = 1;
             printf("\n[INFO] Another sensor has exited\n");
             printf("[INFO] Cancelling current input...\n");
@@ -53,7 +79,7 @@ static void *listener(void *arg) {
             pthread_mutex_unlock(&mutex);
             break;
         }
-        printf("\n[INFO] Current city status: %s\n\n", msg.status);
+        printf("\n[INFO] Current city status: %s\n\n", pkt.body.status);
         printf("Masukkan data:\n");
         fflush(stdout);
         pthread_mutex_unlock(&mutex);
@@ -71,37 +97,54 @@ static int ok_st(char st) {
     return (st == 'L' || st == 'H');
 }
 
-int main(void) {
-    mq_out = mq_open(MQ_DATA,   O_WRONLY);
-    mq_in  = mq_open(MQ_STATUS, O_RDONLY);
+static void set_stdin_nonblocking(void) {
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+    }
+}
 
-    if (mq_out == (mqd_t)-1 || mq_in == (mqd_t)-1) {
-        perror("mq_open");
+int main(void) {
+    key_t k_data = key_data();
+    key_t k_status = key_status();
+
+    if (k_data == (key_t)-1 || k_status == (key_t)-1) {
+        perror("ftok");
+        return 1;
+    }
+
+    q_data = msgget(k_data, 0666);
+    q_status = msgget(k_status, 0666);
+
+    if (q_data < 0 || q_status < 0) {
+        perror("msgget");
         printf("Is the server running?\n");
         return 1;
     }
 
-    SensorMsg reg;
+    DataPacket reg;
     memset(&reg, 0, sizeof(reg));
-    reg.type = T_REG;
-    mq_send(mq_out, (char *)&reg, sizeof(reg), 0);
+    reg.mtype = 1;
+    reg.body.type = T_REG;
+    reg.body.pid = (int)getpid();
+    msgsnd(q_data, &reg, sizeof(reg.body), 0);
 
-    ServerMsg ack;
+    StatusPacket ack;
     memset(&ack, 0, sizeof(ack));
-    mq_receive(mq_in, (char *)&ack, MSGSZ, NULL);
+    msgrcv(q_status, &ack, sizeof(ack.body), reg.body.pid, 0);
 
-    if (ack.bye) {
+    if (ack.body.bye) {
         printf("[INFO] System shutting down...\n");
-        mq_close(mq_out);
-        mq_close(mq_in);
         return 0;
     }
 
-    my_id = ack.id;
+    my_id = ack.body.id;
     printf("[SENSOR %d] Connected as Sensor %d\n\n", my_id, my_id);
 
     pthread_t tid;
     pthread_create(&tid, NULL, listener, NULL);
+
+    set_stdin_nonblocking();
 
     char input[128];
     while (!done) {
@@ -114,6 +157,9 @@ int main(void) {
 
         while (count < 2 && !done) {
             if (fgets(input, sizeof(input), stdin) == NULL) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK && !done) {
+                    clearerr(stdin);
+                }
                 usleep(100000);
                 continue;
             }
@@ -127,11 +173,13 @@ int main(void) {
                 fflush(stdout);
                 pthread_mutex_unlock(&mutex);
 
-                SensorMsg ex;
+                DataPacket ex;
                 memset(&ex, 0, sizeof(ex));
-                ex.type = T_EXIT;
-                ex.id   = my_id;
-                mq_send(mq_out, (char *)&ex, sizeof(ex), 0);
+                ex.mtype = my_id;
+                ex.body.type = T_EXIT;
+                ex.body.id   = my_id;
+                ex.body.pid  = (int)getpid();
+                msgsnd(q_data, &ex, sizeof(ex.body), 0);
 
                 done = 1;
 
@@ -148,6 +196,10 @@ int main(void) {
                 printf("Input tidak valid. Format: <ID_SENSOR> <LOKASI> <STATUS>\n");
                 continue;
             }
+
+            loc = (char)toupper((unsigned char)loc);
+            st  = (char)toupper((unsigned char)st);
+
             if (sid != my_id) {
                 printf("ID sensor tidak sesuai. Anda adalah Sensor %d.\n", my_id);
                 continue;
@@ -164,6 +216,7 @@ int main(void) {
 
             batch[count].type = T_DATA;
             batch[count].id   = sid;
+            batch[count].pid  = (int)getpid();
             batch[count].loc  = loc;
             batch[count].st   = st;
             count++;
@@ -171,15 +224,18 @@ int main(void) {
 
         if (done) break;
 
-        for (int i = 0; i < count; i++)
-            mq_send(mq_out, (char *)&batch[i], sizeof(batch[i]), 0);
+        for (int i = 0; i < count; i++) {
+            DataPacket pkt;
+            memset(&pkt, 0, sizeof(pkt));
+            pkt.mtype = my_id;
+            pkt.body = batch[i];
+            msgsnd(q_data, &pkt, sizeof(pkt.body), 0);
+        }
 
         printf("\n");
     }
 
 cleanup:
     pthread_join(tid, NULL);
-    mq_close(mq_out);
-    mq_close(mq_in);
     return 0;
 }

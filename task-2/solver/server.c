@@ -1,13 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mqueue.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
 
-#define MQ_DATA   "/stc_data"
-#define MQ_STATUS "/stc_status"
-#define MSGSZ    256
+#define MSGSZ 256
 
 #define T_REG  0
 #define T_DATA 1
@@ -16,27 +14,56 @@
 typedef struct {
     int  type;
     int  id;
+    int  pid;
     char loc;
     char st;
 } SensorMsg;
 
 typedef struct {
     int  id;
+    int  pid;
     char status[32];
     int  bye;
 } ServerMsg;
 
+typedef struct {
+    long mtype;
+    SensorMsg body;
+} DataPacket;
+
+typedef struct {
+    long mtype;
+    ServerMsg body;
+} StatusPacket;
+
+static key_t key_data(void) {
+    return ftok(".", 'D');
+}
+
+static key_t key_status(void) {
+    return ftok(".", 'S');
+}
+
+static int recreate_queue(key_t key) {
+    int qid = msgget(key, 0666);
+    if (qid >= 0) msgctl(qid, IPC_RMID, NULL);
+    return msgget(key, IPC_CREAT | 0666);
+}
+
 int main(void) {
-    struct mq_attr attr = {0, 10, MSGSZ, 0};
+    key_t k_data = key_data();
+    key_t k_status = key_status();
 
-    mq_unlink(MQ_DATA);
-    mq_unlink(MQ_STATUS);
+    if (k_data == (key_t)-1 || k_status == (key_t)-1) {
+        perror("ftok");
+        return 1;
+    }
 
-    mqd_t mq_in  = mq_open(MQ_DATA,   O_CREAT | O_RDONLY, 0666, &attr);
-    mqd_t mq_out = mq_open(MQ_STATUS, O_CREAT | O_WRONLY, 0666, &attr);
+    int q_in = recreate_queue(k_data);
+    int q_out = recreate_queue(k_status);
 
-    if (mq_in == (mqd_t)-1 || mq_out == (mqd_t)-1) {
-        perror("mq_open");
+    if (q_in < 0 || q_out < 0) {
+        perror("msgget");
         return 1;
     }
 
@@ -44,19 +71,21 @@ int main(void) {
 
     int connected = 0;
     while (connected < 2) {
-        SensorMsg msg;
-        memset(&msg, 0, sizeof(msg));
-        mq_receive(mq_in, (char *)&msg, MSGSZ, NULL);
+        DataPacket pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        msgrcv(q_in, &pkt, sizeof(pkt.body), 0, 0);
 
-        if (msg.type == T_REG) {
+        if (pkt.body.type == T_REG) {
             connected++;
             printf("[SERVER] Sensor %d connected\n", connected);
 
-            ServerMsg reply;
+            StatusPacket reply;
             memset(&reply, 0, sizeof(reply));
-            reply.id  = connected;
-            reply.bye = 0;
-            mq_send(mq_out, (char *)&reply, sizeof(reply), 0);
+            reply.mtype = pkt.body.pid;
+            reply.body.id  = connected;
+            reply.body.pid = pkt.body.pid;
+            reply.body.bye = 0;
+            msgsnd(q_out, &reply, sizeof(reply.body), 0);
         }
     }
 
@@ -70,9 +99,10 @@ int main(void) {
         memset(traffic, '?', sizeof(traffic));
 
         while (cnt < 4) {
-            SensorMsg msg;
-            memset(&msg, 0, sizeof(msg));
-            mq_receive(mq_in, (char *)&msg, MSGSZ, NULL);
+            DataPacket pkt;
+            memset(&pkt, 0, sizeof(pkt));
+            msgrcv(q_in, &pkt, sizeof(pkt.body), 0, 0);
+            SensorMsg msg = pkt.body;
 
             if (msg.type == T_EXIT) {
                 exited = 1;
@@ -91,11 +121,13 @@ int main(void) {
             printf("[SERVER] Exit signal received\n");
             printf("[SERVER] Shutting down system...\n");
 
-            ServerMsg bye_msg;
+            StatusPacket bye_msg;
             memset(&bye_msg, 0, sizeof(bye_msg));
-            bye_msg.bye = 1;
-            mq_send(mq_out, (char *)&bye_msg, sizeof(bye_msg), 0);
-            mq_send(mq_out, (char *)&bye_msg, sizeof(bye_msg), 0);
+            bye_msg.body.bye = 1;
+            bye_msg.mtype = 1;
+            msgsnd(q_out, &bye_msg, sizeof(bye_msg.body), 0);
+            bye_msg.mtype = 2;
+            msgsnd(q_out, &bye_msg, sizeof(bye_msg.body), 0);
             break;
         }
 
@@ -122,20 +154,20 @@ int main(void) {
 
         printf("\n[SERVER] City Status: %s\n\n", status);
 
-        ServerMsg reply;
+        StatusPacket reply;
         memset(&reply, 0, sizeof(reply));
-        strncpy(reply.status, status, sizeof(reply.status) - 1);
-        reply.bye = 0;
+        strncpy(reply.body.status, status, sizeof(reply.body.status) - 1);
+        reply.body.bye = 0;
 
-        mq_send(mq_out, (char *)&reply, sizeof(reply), 0);
-        mq_send(mq_out, (char *)&reply, sizeof(reply), 0);
+        reply.mtype = 1;
+        msgsnd(q_out, &reply, sizeof(reply.body), 0);
+        reply.mtype = 2;
+        msgsnd(q_out, &reply, sizeof(reply.body), 0);
     }
 
     printf("[SERVER] Cleaning up message queue...\n");
-    mq_close(mq_in);
-    mq_close(mq_out);
-    mq_unlink(MQ_DATA);
-    mq_unlink(MQ_STATUS);
+    msgctl(q_in, IPC_RMID, NULL);
+    msgctl(q_out, IPC_RMID, NULL);
     printf("[SERVER] Done.\n");
 
     return 0;

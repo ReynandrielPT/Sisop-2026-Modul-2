@@ -37,6 +37,7 @@ Setiap giliran, pemain akan melihat papan lawan di bagian atas dan papan milikny
 ```
 
 Keterangan:
+
 - `S` : Kapal milik pemain
 - `X` : Petak yang tertembak dan kena
 - ` ` : Petak yang tertembak tapi kosong (meleset)
@@ -48,9 +49,9 @@ Keterangan:
 
 ### a. Persiapan Koneksi dan Antrean Pesan _(Connection Setup and Message Queues)_
 
-Buatlah program `server.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif.
+Buatlah program `game.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif.
 
-**Server** harus membuat dan mengelola **POSIX Message Queue** untuk komunikasi. Dibutuhkan 1 queue publik untuk menerima koneksi pemain baru dan **4 queue privat** untuk komunikasi dua arah saat gameplay: 2 queue untuk menerima pesan dari setiap pemain, dan 2 queue untuk mengirimkan respons ke setiap pemain.
+**Server** harus membuat dan mengelola **message queue** untuk komunikasi. Dibutuhkan 1 queue publik untuk menerima koneksi pemain baru dan **4 queue privat** untuk komunikasi dua arah saat gameplay: 2 queue untuk menerima pesan dari setiap pemain, dan 2 queue untuk mengirimkan respons ke setiap pemain.
 
 **Player** dijalankan sederhana tanpa argumen tambahan: `./player`. Program pertama yang terhubung akan ditugaskan sebagai Player 1, dan yang kedua sebagai Player 2.
 
@@ -85,6 +86,7 @@ Kapal 2 ditempatkan.
 ```
 
 Ketentuan validasi penempatan:
+
 - Koordinat harus berada dalam batas papan (baris `0-3`, kolom `A-D`).
 - Petak yang dipilih tidak boleh menimpa kapal yang sudah ditempatkan.
 
@@ -120,10 +122,11 @@ Setiap giliran, program menampilkan papan lawan di bagian atas, papan milik pema
 2| | |S| |
 3| | | | |
 
-Target: 
+Target:
 ```
 
 Format perintah tembak hanya membutuhkan koordinat target tembakan.
+
 ```text
 Target: 2C
 ```
@@ -152,6 +155,7 @@ Setelah tembakan dilakukan, server memproses hasilnya dan mengirimkan notifikasi
 ```
 
 Ketentuan validasi yang dilakukan server:
+
 - Koordinat tembakan harus berada dalam batas papan (baris `0-3`, kolom `A-D`).
 - Pemain dapat menembak petak yang sebelumnya sudah pernah ditembak, namun hasilnya selalu dianggap `MELESET`.
 - Setiap giliran, pemain hanya dapat menembak satu kali pada satu target koordinat.
@@ -169,6 +173,7 @@ Ketika tembakan lawan mendarat di papan pemain, thread pendengar menampilkan inf
 Permainan berakhir ketika semua kapal milik salah satu pemain berhasil ditenggelamkan. Server mengirimkan pesan kemenangan dan kekalahan ke masing-masing pemain.
 
 Pemenang:
+
 ```text
 ========================================
 [HASIL] Semua kapal musuh telah tenggelam!
@@ -177,6 +182,7 @@ Pemenang:
 ```
 
 Yang kalah:
+
 ```text
 ========================================
 [HASIL] Semua kapal Anda telah tenggelam.
@@ -187,14 +193,16 @@ Yang kalah:
 Setelah permainan berakhir, kedua program harus melakukan pembersihan semua message queue sebelum keluar.
 
 Jalankan server dengan:
+
 ```bash
-gcc server.c -o server -lrt
-./server
+gcc game.c -o game
+./game
 ```
 
 Jalankan setiap pemain di terminal terpisah dengan:
+
 ```bash
-gcc player.c -o player -lrt -lpthread
+gcc player.c -o player -lpthread
 ./player
 ```
 
@@ -204,7 +212,8 @@ gcc player.c -o player -lrt -lpthread
 
 > Jalankan 3 terminal secara bersamaan. Terminal server harus dijalankan lebih dulu.
 
-**Terminal 1 — Server (`./server`)**
+**Terminal 1 — Server (`./game`)**
+
 ```text
 [SERVER] Game Master Battleship dimulai (4x4 Sederhana).
 [SERVER] Menunggu Pemain 1...
@@ -226,6 +235,7 @@ gcc player.c -o player -lrt -lpthread
 ```
 
 **Terminal 2 — Pemain 1 (`./player`)**
+
 ```text
 [PEMAIN] Menghubungkan ke server...
 [PEMAIN 1] Berhasil terhubung!
@@ -326,6 +336,7 @@ Each turn, the active player sees the **enemy board on top** and their **own boa
 ```
 
 Legend:
+
 - `S` : Player's Ship
 - `X` : Tile that was shot and hit
 - ` ` : Tile that was shot but empty
@@ -337,9 +348,9 @@ Legend:
 
 ### a. Connection Setup and Message Queues
 
-Create a `server.c` program that acts as the **Game Master** and a `player.c` program as the interactive player client.
+Create a `game.c` program that acts as the **Game Master** and a `player.c` program as the interactive player client.
 
-The **server** must create and manage **POSIX Message Queues** for communication. This includes 1 public queue to accept player connections and **4 private queues** for bidirectional gameplay communication: 2 queues to receive messages from each player, and 2 queues to send responses back to each player.
+The **server** must create and manage **message queues** for communication. This includes 1 public queue to accept player connections and **4 private queues** for bidirectional gameplay communication: 2 queues to receive messages from each player, and 2 queues to send responses back to each player.
 
 To launch the **Player** client, simply run `./player` without arguments. The first process to connect successfully will be automatically assigned as Player 1, and the second as Player 2.
 
@@ -374,6 +385,7 @@ Kapal 2 ditempatkan.
 ```
 
 Placement validation rules:
+
 - Coordinates must be within the grid (rows `0-3`, columns `A-D`).
 - No tile may overlap a ship already placed.
 
@@ -409,10 +421,11 @@ Each turn, the program displays the **enemy board on top**, the **player's own b
 2| | |S| |
 3| | | | |
 
-Target: 
+Target:
 ```
 
 The player enters exactly 1 coordinate to strike.
+
 ```text
 Target: 2C
 ```
@@ -441,6 +454,7 @@ After the shot is fired, the server processes the results and sends notification
 ```
 
 Validation rules enforced by the server:
+
 - Target coordinates must be within the grid (rows `0-3`, columns `A-D`).
 - Players may shoot at tiles that have already been targeted before, but the result is always treated as a `MISS`.
 - Each turn allows only one target coordinate.
@@ -458,6 +472,7 @@ When an opponent's shot lands on the player's grid, the listener thread immediat
 The game ends when all ships belonging to one player have been sunk. The server sends the appropriate message to each player.
 
 Winner:
+
 ```text
 ========================================
 [HASIL] Semua kapal musuh telah tenggelam!
@@ -466,6 +481,7 @@ Winner:
 ```
 
 Loser:
+
 ```text
 ========================================
 [HASIL] Semua kapal Anda telah tenggelam.
@@ -476,13 +492,17 @@ Loser:
 After the game ends, both programs must clean up all message queues before exiting.
 
 Run the server with:
+
 ```bash
-gcc server.c -o server -lrt
-./server
+gcc game.c -o game
+./game
 ```
 
 Run each player in a separate terminal with:
+
 ```bash
-gcc player.c -o player -lrt -lpthread
+gcc player.c -o player -lpthread
 ./player
 ```
+
+

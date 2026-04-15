@@ -445,3 +445,7 @@ Run:
 3. Sensor programs must use threads and mutexes.
 5. Programs must avoid deadlocks and race conditions.
 6. The server must clean up the message queue before exiting.
+
+
+
+

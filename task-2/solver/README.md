@@ -1,12 +1,14 @@
-﻿# Pembahasan Task 2 _(Smart Traffic Controller / STC)_
+# Pembahasan Task 2 _(Smart Traffic Controller / STC)_
 
 ## Kompilasi dan Cara Menjalankan
 
-```ngcc server.c -o server -lrt
-gcc sensor.c -o sensor -lrt -lpthread
+```
+gcc server.c -o server
+gcc sensor.c -o sensor -lpthread
 ```
 
-```n./server            # terminal 1
+```
+./server            # terminal 1
 ./sensor            # terminal 2 (Sensor 1)
 ./sensor            # terminal 3 (Sensor 2)
 ```
@@ -15,26 +17,27 @@ gcc sensor.c -o sensor -lrt -lpthread
 
 ## Desain Antrean Pesan
 
-Program menggunakan **2 POSIX Message Queue**:
+Program menggunakan **2 message queue**:
 
-| Nama | Arah | Fungsi |
-|------|------|--------|
-| `/stc_s2srv` | sensor → server | Semua pesan dari sensor ke server |
-| `/stc_srv2s` | server → sensor | Semua pesan dari server ke sensor |
+| Nama         | Arah            | Fungsi                            |
+| ------------ | --------------- | --------------------------------- |
+| `/stc_s2srv` | sensor ? server | Semua pesan dari sensor ke server |
+| `/stc_srv2s` | server ? sensor | Semua pesan dari server ke sensor |
 
 Karena kedua sensor berbagi queue yang sama, server membedakan pesan berdasarkan field `type` di dalam struct `SensorMsg`.
 
 ### Tipe Pesan
 
-| Konstanta | Nilai | Makna |
-|-----------|-------|-------|
-| `T_REG` | 0 | Sensor mendaftar ke server |
-| `T_DATA` | 1 | Sensor mengirim data lalu lintas |
-| `T_EXIT` | 2 | Sensor mengirim sinyal keluar |
+| Konstanta | Nilai | Makna                            |
+| --------- | ----- | -------------------------------- |
+| `T_REG`   | 0     | Sensor mendaftar ke server       |
+| `T_DATA`  | 1     | Sensor mengirim data lalu lintas |
+| `T_EXIT`  | 2     | Sensor mengirim sinyal keluar    |
 
 ### Struct Pesan
 
-```ntypedef struct {
+```
+typedef struct {
     int  type;
     int  id;
     char loc;
@@ -51,12 +54,17 @@ typedef struct {
 ---
 
 ## a. Setup Koneksi _(Connection Setup)_
+
 ### Soal
+
 Buat `server.c` sebagai pusat kontrol dan `sensor.c` sebagai client sensor. Komunikasi menggunakan **2 Message Queue** (satu arah masing-masing). Sensor pertama yang terhubung menjadi Sensor 1, sensor kedua menjadi Sensor 2.
 
 ### Penyelesaian
+
 - Code Lengkap (server.c bagian koneksi):
-```n#define MQ_DATA   "/stc_data"
+
+```
+#define MQ_DATA   "/stc_data"
 #define MQ_STATUS "/stc_status"
 #define MSGSZ    256
 
@@ -73,7 +81,8 @@ int main(void) {
     mqd_t mq_in  = mq_open(MQ_DATA,   O_CREAT | O_RDONLY, 0666, &attr);
     mqd_t mq_out = mq_open(MQ_STATUS, O_CREAT | O_WRONLY, 0666, &attr);
 
-    printf("[SERVER] Waiting for sensors...\n");
+    printf("[SERVER] Waiting for sensors...
+");
 
     int connected = 0;
     while (connected < 2) {
@@ -83,7 +92,8 @@ int main(void) {
 
         if (msg.type == T_REG) {
             connected++;
-            printf("[SERVER] Sensor %d connected\n", connected);
+            printf("[SERVER] Sensor %d connected
+", connected);
 
             ServerMsg reply;
             memset(&reply, 0, sizeof(reply));
@@ -92,12 +102,16 @@ int main(void) {
             mq_send(mq_out, (char *)&reply, sizeof(reply), 0);
         }
     }
-    printf("[SERVER] System ready!\n\n");
+    printf("[SERVER] System ready!
+
+");
 }
 ```
 
 - Code Lengkap (sensor.c bagian koneksi):
-```nstatic mqd_t mq_out, mq_in;
+
+```
+static mqd_t mq_out, mq_in;
 static int   my_id;
 
 int main(void) {
@@ -114,42 +128,57 @@ int main(void) {
     mq_receive(mq_in, (char *)&ack, MSGSZ, NULL);
 
     my_id = ack.id;
-    printf("[SENSOR %d] Connected as Sensor %d\n\n", my_id, my_id);
+    printf("[SENSOR %d] Connected as Sensor %d
+
+", my_id, my_id);
 }
 ```
 
 Penjelasan:
-```nstruct mq_attr attr = {0, 20, MSGSZ, 0};
+
 ```
+struct mq_attr attr = {0, 20, MSGSZ, 0};
+```
+
 Antrean dibuat dengan kapasitas 20 pesan dan ukuran 256 byte. Kapasitas lebih besar karena kedua sensor berbagi satu queue; pesan bisa menumpuk.
 
-```nif (msg.type == T_REG) {
+```
+if (msg.type == T_REG) {
     connected++;
     reply.id = connected;
     mq_send(mq_out, (char *)&reply, sizeof(reply), 0);
 }
 ```
+
 Server menetapkan ID sensor berdasarkan urutan registrasi. Sensor pertama mendapat `id = 1`, sensor kedua `id = 2`, langsung dikirim balik ke `MQ_STATUS`.
 
-```nreg.type = T_REG;
+```
+reg.type = T_REG;
 mq_send(mq_out, (char *)&reg, sizeof(reg), 0);
 ServerMsg ack;
 mq_receive(mq_in, (char *)&ack, MSGSZ, NULL);
 my_id = ack.id;
 ```
+
 Sensor menulis ke `MQ_DATA` untuk mendaftar, lalu menunggu balasan `ack` dari `MQ_STATUS` secara blocking. Ini memungkinkan server memproses registrasi secara berurutan tanpa race condition.
 
 ---
 
 ## b. Input Data Sensor _(Input Sensor Data)_
+
 ### Soal
+
 Setiap sensor mengirimkan data 2 lokasi per siklus secara terus-menerus. Format: `<ID_SENSOR> <LOKASI> <STATUS>`. Sistem berhenti bila sensor mengirim `exit`.
 
 ### Penyelesaian
+
 - Code Lengkap (sensor.c bagian input):
-```nchar input[128];
+
+```
+char input[128];
 while (!done) {
-    printf("Masukkan data:\n");
+    printf("Masukkan data:
+");
     fflush(stdout);
 
     int count = 0;
@@ -162,10 +191,12 @@ while (!done) {
         }
 
         int n = strlen(input);
-        while (n > 0 && (input[n-1]=='\n'||input[n-1]=='\r')) input[--n]='\0';
+        while (n > 0 && (input[n-1]=='
+'||input[n-1]=='\r')) input[--n]='\0';
 
         if (strcmp(input, "exit") == 0) {
-            printf("[SENSOR] Sending exit signal...\n");
+            printf("[SENSOR] Sending exit signal...
+");
 
             SensorMsg ex;
             memset(&ex, 0, sizeof(ex));
@@ -174,26 +205,31 @@ while (!done) {
             mq_send(mq_out, (char *)&ex, sizeof(ex), 0);
             done = 1;
 
-            printf("[SENSOR] Shutting down...\n");
+            printf("[SENSOR] Shutting down...
+");
             goto cleanup;
         }
 
         int sid; char loc, st;
         if (sscanf(input, "%d %c %c", &sid, &loc, &st) != 3) {
-            printf("Input tidak valid. Format: <ID_SENSOR> <LOKASI> <STATUS>\n");
+            printf("Input tidak valid. Format: <ID_SENSOR> <LOKASI> <STATUS>
+");
             continue;
         }
         if (sid != my_id) {
-            printf("ID sensor tidak sesuai. Anda adalah Sensor %d.\n", my_id);
+            printf("ID sensor tidak sesuai. Anda adalah Sensor %d.
+", my_id);
             continue;
         }
         if (!ok_loc(loc, my_id)) {
-            printf("Lokasi tidak valid untuk Sensor %d. Gunakan %s.\n",
+            printf("Lokasi tidak valid untuk Sensor %d. Gunakan %s.
+",
                    my_id, my_id == 1 ? "A atau B" : "C atau D");
             continue;
         }
         if (!ok_st(st)) {
-            printf("Status tidak valid. Gunakan L atau H.\n");
+            printf("Status tidak valid. Gunakan L atau H.
+");
             continue;
         }
 
@@ -207,42 +243,55 @@ while (!done) {
     if (done) break;
     for (int i = 0; i < count; i++)
         mq_send(mq_out, (char *)&batch[i], sizeof(batch[i]), 0);
-    printf("\n");
+    printf("
+");
 }
 cleanup:
 ```
 
 Penjelasan:
-```nstatic int ok_loc(char loc, int sid) {
+
+```
+static int ok_loc(char loc, int sid) {
     if (sid == 1) return (loc == 'A' || loc == 'B');
     if (sid == 2) return (loc == 'C' || loc == 'D');
     return 0;
 }
 ```
+
 Sensor 1 hanya boleh melaporkan A dan B, Sensor 2 hanya C dan D sesuai alokasi soal.
 
-```nSensorMsg batch[2];
+```
+SensorMsg batch[2];
 for (int i = 0; i < count; i++)
     mq_send(mq_out, (char *)&batch[i], sizeof(batch[i]), 0);
 ```
+
 Data dikumpulkan dulu dalam `batch`, baru dikirim setelah dua input valid terkumpul agar server menerima data per siklus secara utuh.
 
-```nex.type = T_EXIT; ex.id = my_id;
+```
+ex.type = T_EXIT; ex.id = my_id;
 mq_send(mq_out, (char *)&ex, sizeof(ex), 0);
 done = 1;
 goto cleanup;
 ```
+
 Sinyal exit dikirim dengan tipe `T_EXIT`. Flag `done = 1` menghentikan semua loop. `goto cleanup` langsung menuju `pthread_join` dan penutupan queue.
 
 ---
 
 ## c. Pemrosesan Data pada Server _(Server Data Processing)_
+
 ### Soal
+
 Server menunggu tepat 4 data per siklus, menampilkan kondisi tiap lokasi, menghitung H dan L, lalu menentukan status kota. Menangani sinyal exit di tengah siklus.
 
 ### Penyelesaian
+
 - Code Lengkap (server.c bagian pemrosesan):
-```nchar traffic[4];
+
+```
+char traffic[4];
 
 while (1) {
     int cnt = 0, exited = 0;
@@ -264,8 +313,10 @@ while (1) {
     }
 
     if (exited) {
-        printf("[SERVER] Exit signal received\n");
-        printf("[SERVER] Shutting down system...\n");
+        printf("[SERVER] Exit signal received
+");
+        printf("[SERVER] Shutting down system...
+");
         ServerMsg bye_msg; memset(&bye_msg, 0, sizeof(bye_msg));
         bye_msg.bye = 1;
         mq_send(mq_out, (char *)&bye_msg, sizeof(bye_msg), 0);
@@ -273,8 +324,13 @@ while (1) {
         break;
     }
 
-    printf("[SERVER] Received data:\n");
-    printf("  A: %c\n  B: %c\n  C: %c\n  D: %c\n",
+    printf("[SERVER] Received data:
+");
+    printf("  A: %c
+  B: %c
+  C: %c
+  D: %c
+",
            traffic[0], traffic[1], traffic[2], traffic[3]);
 
     int high = 0, low = 0;
@@ -283,15 +339,22 @@ while (1) {
         else if (traffic[i] == 'L') low++;
     }
 
-    printf("\n[SERVER] Summary:\n");
-    printf("  High Traffic: %d\n  Low Traffic : %d\n", high, low);
+    printf("
+[SERVER] Summary:
+");
+    printf("  High Traffic: %d
+  Low Traffic : %d
+", high, low);
 
     const char *status;
     if      (high >= 3) status = "MACET TOTAL";
     else if (high == 2) status = "PADAT";
     else                status = "LANCAR";
 
-    printf("\n[SERVER] City Status: %s\n\n", status);
+    printf("
+[SERVER] City Status: %s
+
+", status);
 
     ServerMsg reply; memset(&reply, 0, sizeof(reply));
     strncpy(reply.status, status, sizeof(reply.status) - 1);
@@ -301,29 +364,40 @@ while (1) {
 ```
 
 Penjelasan:
-```nint idx = msg.loc - 'A';
+
+```
+int idx = msg.loc - 'A';
 traffic[idx] = msg.st;
 ```
-Lokasi `A`→`D` dipetakan ke indeks `0`→`3`. Array `traffic[4]` menyimpan status tiap lokasi sehingga tampilan selalu berurutan A, B, C, D meski data datang dari dua sensor berbeda.
 
-```nif (msg.type == T_EXIT) { exited = 1; break; }
+Lokasi `A`?`D` dipetakan ke indeks `0`?`3`. Array `traffic[4]` menyimpan status tiap lokasi sehingga tampilan selalu berurutan A, B, C, D meski data datang dari dua sensor berbeda.
+
 ```
+if (msg.type == T_EXIT) { exited = 1; break; }
+```
+
 Server tidak menunggu sisa data jika sinyal exit diterima di tengah siklus. Loop langsung keluar dan masuk ke blok shutdown.
 
-```nbye_msg.bye = 1;
+```
+bye_msg.bye = 1;
 mq_send(mq_out, (char *)&bye_msg, sizeof(bye_msg), 0);
 mq_send(mq_out, (char *)&bye_msg, sizeof(bye_msg), 0);
 ```
+
 Shutdown dikirim dua kali (satu per sensor) karena kedua sensor membaca dari queue yang sama.
 
 ---
 
 ## d. Penentuan Status _(Status Determination)_
+
 ### Soal
-`≥3 H` → MACET TOTAL, `2 H` → PADAT, `≤1 H` → LANCAR.
+
+`=3 H` ? MACET TOTAL, `2 H` ? PADAT, `=1 H` ? LANCAR.
 
 ### Penyelesaian
-```nconst char *status;
+
+```
+const char *status;
 if      (high >= 3) status = "MACET TOTAL";
 else if (high == 2) status = "PADAT";
 else                status = "LANCAR";
@@ -335,12 +409,17 @@ Penjelasan:
 ---
 
 ## e. Pengelolaan Thread dan Sinkronisasi _(Thread Management and Synchronization)_
+
 ### Soal
+
 `sensor.c` wajib menggunakan thread dan mutex. Thread utama menangani input, thread `listener` mendengarkan pesan server secara asinkron.
 
 ### Penyelesaian
+
 - Code Lengkap (sensor.c bagian threading):
-```nstatic pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+```
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int    done  = 0;
 
 static void *listener(void *arg) {
@@ -357,15 +436,23 @@ static void *listener(void *arg) {
         pthread_mutex_lock(&mutex);
         if (msg.bye) {
             done = 1;
-            printf("\n[INFO] Another sensor has exited\n");
-            printf("[INFO] Cancelling current input...\n");
-            printf("[INFO] System shutting down...\n");
+            printf("
+[INFO] Another sensor has exited
+");
+            printf("[INFO] Cancelling current input...
+");
+            printf("[INFO] System shutting down...
+");
             fflush(stdout);
             pthread_mutex_unlock(&mutex);
             break;
         }
-        printf("\n[INFO] Current city status: %s\n\n", msg.status);
-        printf("Masukkan data:\n");
+        printf("
+[INFO] Current city status: %s
+
+", msg.status);
+        printf("Masukkan data:
+");
         fflush(stdout);
         pthread_mutex_unlock(&mutex);
     }
@@ -383,42 +470,60 @@ mq_close(mq_in);
 ```
 
 Penjelasan:
-```nstatic volatile int done = 0;
+
 ```
+static volatile int done = 0;
+```
+
 `volatile` memastikan perubahan dari satu thread langsung terlihat di thread lain. `done` diset `1` oleh listener saat menerima `bye`, atau oleh main thread saat user mengetik `exit`.
 
-```npthread_mutex_lock(&mutex);
-printf("\n[INFO] Current city status: %s\n\n", msg.status);
+```
+pthread_mutex_lock(&mutex);
+printf("
+[INFO] Current city status: %s
+
+", msg.status);
 pthread_mutex_unlock(&mutex);
 ```
+
 Semua operasi `printf` dilindungi mutex agar output dari listener dan main thread tidak saling tindih.
 
-```nif (msg.bye) {
+```
+if (msg.bye) {
     done = 1;
     pthread_mutex_unlock(&mutex);
     break;
 }
 ```
+
 Saat menerima `bye` dari server, listener set `done = 1`, cetak pesan info, lalu keluar dari loop. Main thread membaca flag `done` dan berhenti dari input loop.
 
-```npthread_join(tid, NULL);
 ```
+pthread_join(tid, NULL);
+```
+
 Main thread menunggu listener selesai sebelum menutup queue agar listener tidak membaca dari queue yang sudah ditutup.
 
 ---
 
 ## f. Pembersihan Resource _(Resource Cleanup)_
+
 ### Soal
+
 Server wajib menghapus semua message queue setelah sistem dihentikan.
 
 ### Penyelesaian
-```nprintf("[SERVER] Cleaning up message queue...\n");
+
+```
+printf("[SERVER] Cleaning up message queue...
+");
 mq_close(mq_in);
 mq_close(mq_out);
 mq_unlink(MQ_S2SRV);
 mq_unlink(MQ_SRV2S);
-printf("[SERVER] Done.\n");
+printf("[SERVER] Done.
+");
 ```
 
 Penjelasan:
-`mq_close()` menutup file descriptor queue pada proses ini. `mq_unlink()` menghapus queue dari sistem (`/dev/mqueue/`). Keduanya harus dipanggil — `mq_close` saja tidak menghapus queue dari sistem.
+`mq_close()` menutup file descriptor queue pada proses ini. `mq_unlink()` menghapus queue dari sistem (`/dev/mqueue/`). Keduanya harus dipanggil � `mq_close` saja tidak menghapus queue dari sistem.

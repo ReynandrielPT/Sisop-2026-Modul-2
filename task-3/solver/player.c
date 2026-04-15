@@ -1,27 +1,68 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mqueue.h>
-#include <fcntl.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 
-#define MQ_JOIN   "/bs_join"
-#define MQ_P1_IN  "/bs_p1_in"
-#define MQ_P2_IN  "/bs_p2_in"
-#define MQ_P1_OUT "/bs_p1_out"
-#define MQ_P2_OUT "/bs_p2_out"
 #define MSGSZ   256
 
-static mqd_t   mq_out, mq_in;
+#define PROJ_GAME 'G'
+
+#define TYPE_JOIN_REQ 1
+#define TYPE_P1_REQ 11
+#define TYPE_P2_REQ 12
+#define TYPE_P1_RES 21
+#define TYPE_P2_RES 22
+
+typedef struct {
+    long mtype;
+    char text[MSGSZ];
+} MsgPacket;
+
+static int     queueId = -1;
+static long    reqType = TYPE_P1_REQ;
+static long    resType = TYPE_P1_RES;
 static int     player_id;
 static pthread_mutex_t mutex    = PTHREAD_MUTEX_INITIALIZER;
 static volatile int    game_over = 0;
 static volatile int    my_turn   = 0;
 
+static key_t get_key(int proj_id) {
+    return ftok(".", proj_id);
+}
+
+static int recv_msg(int qid, long type, char *out, size_t outsz) {
+    MsgPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    if (msgrcv(qid, &pkt, sizeof(pkt.text), type, 0) < 0) return -1;
+    memset(out, 0, outsz);
+    strncpy(out, pkt.text, outsz - 1);
+    return 0;
+}
+
+static int send_msg(int qid, long type, const char *text) {
+    MsgPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.mtype = type;
+    strncpy(pkt.text, text, MSGSZ - 1);
+    return msgsnd(qid, &pkt, sizeof(pkt.text), 0);
+}
+
 static void strip(char *s) {
     int n = strlen(s);
     while (n > 0 && (s[n-1] == '\n' || s[n-1] == '\r')) s[--n] = '\0';
+}
+
+static void set_stdin_nonblocking(void) {
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+    }
 }
 
 static void show_board(const char *board, int is_enemy) {
@@ -41,8 +82,7 @@ static void *listener(void *arg) {
     char buf[MSGSZ * 2];
 
     while (!game_over) {
-        memset(buf, 0, sizeof(buf));
-        if (mq_receive(mq_in, buf, sizeof(buf), NULL) < 0) {
+        if (recv_msg(queueId, resType, buf, sizeof(buf)) < 0) {
             if (game_over) break;
             continue;
         }
@@ -123,33 +163,31 @@ static void *listener(void *arg) {
 int main(void) {
     printf("[PEMAIN] Menghubungkan ke server...\n");
 
-    pid_t pid = getpid();
-    char  tmp_q[128];
-    snprintf(tmp_q, sizeof(tmp_q), "/bs_tmp_%d", (int)pid);
+    key_t k_game = get_key(PROJ_GAME);
 
-    struct mq_attr attr = {0, 10, MSGSZ, 0};
-    mqd_t mq_tmp = mq_open(tmp_q, O_CREAT | O_RDONLY, 0666, &attr);
-    if (mq_tmp == (mqd_t)-1) { perror("mq_open tmp"); return 1; }
+    if (k_game == (key_t)-1) {
+        perror("ftok");
+        return 1;
+    }
 
-    mqd_t mq_join = mq_open(MQ_JOIN, O_WRONLY);
-    if (mq_join == (mqd_t)-1) {
-        perror("mq_open join");
+    queueId = msgget(k_game, 0666);
+    if (queueId < 0) {
+        perror("msgget join");
         printf("Apakah server sudah berjalan?\n");
-        mq_close(mq_tmp); mq_unlink(tmp_q);
         return 1;
     }
 
     char join_msg[MSGSZ];
-    snprintf(join_msg, MSGSZ, "JOIN %s", tmp_q);
-    mq_send(mq_join, join_msg, strlen(join_msg) + 1, 0);
-    mq_close(mq_join);
+    long my_type = (long)getpid();
+    snprintf(join_msg, MSGSZ, "JOIN %ld", my_type);
+    send_msg(queueId, TYPE_JOIN_REQ, join_msg);
 
     char buf[MSGSZ * 2];
-    memset(buf, 0, sizeof(buf));
-    mq_receive(mq_tmp, buf, sizeof(buf), NULL);
+    if (recv_msg(queueId, my_type, buf, sizeof(buf)) < 0) {
+        perror("msgrcv join");
+        return 1;
+    }
     player_id = atoi(buf);
-    mq_close(mq_tmp);
-    mq_unlink(tmp_q);
 
     if (player_id < 1 || player_id > 2) {
         printf("Gagal mendapat ID pemain.\n");
@@ -158,18 +196,13 @@ int main(void) {
 
     printf("[PEMAIN %d] Berhasil terhubung!\n", player_id);
 
-    mq_out = mq_open(player_id == 1 ? MQ_P1_IN  : MQ_P2_IN,  O_WRONLY);
-    mq_in  = mq_open(player_id == 1 ? MQ_P1_OUT : MQ_P2_OUT, O_RDONLY);
-    if (mq_out == (mqd_t)-1 || mq_in == (mqd_t)-1) {
-        perror("mq_open game queues");
-        return 1;
-    }
+    reqType = player_id == 1 ? TYPE_P1_REQ : TYPE_P2_REQ;
+    resType = player_id == 1 ? TYPE_P1_RES : TYPE_P2_RES;
 
     if (player_id == 1)
         printf("[SERVER] Menunggu Pemain 2 untuk bergabung...\n");
 
-    memset(buf, 0, sizeof(buf));
-    mq_receive(mq_in, buf, sizeof(buf), NULL);
+    recv_msg(queueId, resType, buf, sizeof(buf));
     if (strcmp(buf, "START") == 0)
         printf("[SERVER] Permainan dimulai (4x4 Sederhana)!\n\n");
 
@@ -201,10 +234,9 @@ int main(void) {
 
             char cmd[MSGSZ];
             snprintf(cmd, MSGSZ, "PLACE %s", input);
-            mq_send(mq_out, cmd, strlen(cmd) + 1, 0);
+            send_msg(queueId, reqType, cmd);
 
-            memset(buf, 0, sizeof(buf));
-            mq_receive(mq_in, buf, sizeof(buf), NULL);
+            recv_msg(queueId, resType, buf, sizeof(buf));
 
             if (strncmp(buf, "ERR ", 4) == 0) {
                 printf("%s\n", buf + 4);
@@ -215,21 +247,28 @@ int main(void) {
         }
     }
 
-    memset(buf, 0, sizeof(buf));
-    mq_receive(mq_in, buf, sizeof(buf), NULL);
-    if (strcmp(buf, "WAIT_OPP") == 0)
-        printf("\n[INFO] Menunggu lawan menyelesaikan penempatan...\n");
-
-    memset(buf, 0, sizeof(buf));
-    mq_receive(mq_in, buf, sizeof(buf), NULL);
-    if (strcmp(buf, "READY") == 0)
-        printf("[INFO] Semua pemain siap.\n");
+    while (1) {
+        recv_msg(queueId, resType, buf, sizeof(buf));
+        if (strcmp(buf, "WAIT_OPP") == 0) {
+            printf("\n[INFO] Menunggu lawan menyelesaikan penempatan...\n");
+            continue;
+        }
+        if (strcmp(buf, "READY") == 0) {
+            printf("[INFO] Semua pemain siap.\n");
+            break;
+        }
+    }
 
     pthread_t tid;
     pthread_create(&tid, NULL, listener, NULL);
 
+    set_stdin_nonblocking();
+
     while (!game_over) {
         if (fgets(input, sizeof(input), stdin) == NULL) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK && !game_over) {
+                clearerr(stdin);
+            }
             usleep(100000);
             continue;
         }
@@ -255,11 +294,9 @@ int main(void) {
 
         char cmd[MSGSZ];
         snprintf(cmd, MSGSZ, "FIRE %s", input);
-        mq_send(mq_out, cmd, strlen(cmd) + 1, 0);
+        send_msg(queueId, reqType, cmd);
     }
 
     pthread_join(tid, NULL);
-    mq_close(mq_in);
-    mq_close(mq_out);
     return 0;
 }
