@@ -1,436 +1,336 @@
-# Pembahasan Task 3 _(Simulasi Pertempuran Laut / Naval Battle Simulation)_
+﻿# Pembahasan Task 3 _(Simulasi Pertempuran Laut / Naval Battle Simulation)_
 
 ## Kompilasi dan Cara Menjalankan
 
-Kompilasi server:
-```bash
-gcc server.c -o server -lrt
-```
-
-Kompilasi player:
-```bash
+```ngcc server.c -o server -lrt
 gcc player.c -o player -lrt -lpthread
 ```
 
-Jalankan server terlebih dahulu di terminal pertama:
-```bash
-./server
+Jalankan server terlebih dahulu, lalu jalankan player di dua terminal terpisah:
+```n./server
+./player   # terminal 2
+./player   # terminal 3
 ```
 
-Jalankan player di terminal kedua dan ketiga:
-```bash
-./player
-```
+---
+
+## Desain Antrean Pesan
+
+Program menggunakan **5 POSIX Message Queue**:
+
+| Nama | Arah | Fungsi |
+|------|------|--------|
+| `MQ_JOIN /bs_join` | player → server | Player mendaftar (handshake awal) |
+| `MQ_P1 /bs_p1` | player 1 → server | Perintah game dari Player 1 |
+| `MQ_P2 /bs_p2` | player 2 → server | Perintah game dari Player 2 |
+| `MQ_S1 /bs_s1` | server → player 1 | Respons server ke Player 1 |
+| `MQ_S2 /bs_s2` | server → player 2 | Respons server ke Player 2 |
+
+Selain itu, setiap player membuat 1 **antrean sementara** (`/bs_tmp_<pid>`) khusus untuk menerima ID pemain saat handshake, lalu langsung dihapus.
+
+### Protokol Pesan
+
+| Token | Arah | Makna |
+|-------|------|-------|
+| `JOIN <queue>` | player → server | Daftarkan diri, sertakan nama temp queue |
+| `START` | server → player | Kedua pemain sudah terhubung |
+| `PLACE <coord>` | player → server | Tempatkan kapal di koordinat |
+| `OK <pesan>` | server → player | Kapal berhasil ditempatkan |
+| `ERR <pesan>` | server → player | Input tidak valid (placement/fire) |
+| `WAIT_OPP` | server → player 1 | Tunggu lawan selesai menempatkan |
+| `READY` | server → player | Semua pemain siap, game dimulai |
+| `TURN <own>\|<shot>` | server → player | Giliran bermain + data papan |
+| `WAIT <pesan>` | server → player | Giliran lawan sedang bermain |
+| `FIRE <coord>` | player → server | Tembak koordinat |
+| `RES <hasil>` | server → player | Hasil tembakan pemain ini |
+| `OPP <hasil>` | server → player | Informasi tembakan lawan |
+| `WIN` | server → player | Pemain menang |
+| `LOSE` | server → player | Pemain kalah |
 
 ---
 
 ## a. Persiapan Koneksi dan Antrean Pesan _(Connection Setup and Message Queues)_
 ### Soal
-Buatlah program `server.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif. Server harus membuat dan mengelola **POSIX Message Queue** untuk komunikasi. Dibutuhkan 1 queue publik untuk menerima koneksi pemain baru dan **4 queue privat** untuk komunikasi dua arah saat gameplay: 2 queue untuk menerima pesan dari setiap pemain, dan 2 queue untuk mengirimkan respons ke setiap pemain. Player dijalankan sederhana tanpa argumen tambahan: `./player`. Program pertama yang terhubung akan ditugaskan sebagai Player 1, dan yang kedua sebagai Player 2.
+Buatlah program `server.c` yang berperan sebagai **Game Master** dan program `player.c` sebagai klien pemain interaktif. Server harus membuat dan mengelola **POSIX Message Queue** untuk komunikasi. Dibutuhkan 1 queue publik untuk menerima koneksi pemain baru dan **4 queue privat** untuk komunikasi dua arah saat gameplay.
 
 ### Penyelesaian
 - Code Lengkap (server.c bagian koneksi):
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <mqueue.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <time.h>
-#include <unistd.h>
-
-#define MQ_BS_JOIN    "/mq_bs_join"
-#define MQ_P1_TO_SRV  "/mq_bs_p1_srv"
-#define MQ_P2_TO_SRV  "/mq_bs_p2_srv"
-#define MQ_SRV_TO_P1  "/mq_bs_srv_p1"
-#define MQ_SRV_TO_P2  "/mq_bs_srv_p2"
-#define MSG_SIZE      512
+```n#define MQ_JOIN "/bs_join"
+#define MQ_P1   "/bs_p1"
+#define MQ_P2   "/bs_p2"
+#define MQ_S1   "/bs_s1"
+#define MQ_S2   "/bs_s2"
+#define MSGSZ   256
 
 static mqd_t mq_in[2], mq_out[2];
 
 int main(void) {
-    struct mq_attr attr = { .mq_flags = 0, .mq_maxmsg = 10,
-                            .mq_msgsize = MSG_SIZE, .mq_curmsgs = 0 };
+    struct mq_attr attr = {0, 10, MSGSZ, 0};
 
-    mq_unlink(MQ_BS_JOIN);
-    mq_unlink(MQ_P1_TO_SRV); mq_unlink(MQ_P2_TO_SRV);
-    mq_unlink(MQ_SRV_TO_P1); mq_unlink(MQ_SRV_TO_P2);
+    mq_unlink(MQ_JOIN); mq_unlink(MQ_P1); mq_unlink(MQ_P2);
+    mq_unlink(MQ_S1);   mq_unlink(MQ_S2);
 
-    printf("[SERVER] Game Master Battleship dimulai (4x4 Sederhana).\n");
-
-    mq_in[0]  = mq_open(MQ_P1_TO_SRV, O_CREAT | O_RDONLY, 0666, &attr);
-    mq_in[1]  = mq_open(MQ_P2_TO_SRV, O_CREAT | O_RDONLY, 0666, &attr);
-    mq_out[0] = mq_open(MQ_SRV_TO_P1, O_CREAT | O_WRONLY, 0666, &attr);
-    mq_out[1] = mq_open(MQ_SRV_TO_P2, O_CREAT | O_WRONLY, 0666, &attr);
-    mqd_t mq_join = mq_open(MQ_BS_JOIN, O_CREAT | O_RDONLY, 0666, &attr);
+    mq_in[0]  = mq_open(MQ_P1,   O_CREAT | O_RDONLY, 0666, &attr);
+    mq_in[1]  = mq_open(MQ_P2,   O_CREAT | O_RDONLY, 0666, &attr);
+    mq_out[0] = mq_open(MQ_S1,   O_CREAT | O_WRONLY, 0666, &attr);
+    mq_out[1] = mq_open(MQ_S2,   O_CREAT | O_WRONLY, 0666, &attr);
+    mqd_t mq_join = mq_open(MQ_JOIN, O_CREAT | O_RDONLY, 0666, &attr);
 
     for (int i = 0; i < 2; i++) {
-        char buf[MSG_SIZE];
+        char buf[MSGSZ];
         printf("[SERVER] Menunggu Pemain %d...\n", i + 1);
-        memset(buf, 0, MSG_SIZE);
-        mq_receive(mq_join, buf, MSG_SIZE, NULL);
+        memset(buf, 0, MSGSZ);
+        mq_receive(mq_join, buf, MSGSZ, NULL);
 
-        if (strncmp(buf, "CONNECT ", 8) == 0) {
-            char temp_q[128];
-            sscanf(buf + 8, "%s", temp_q);
-
-            mqd_t mq_temp = mq_open(temp_q, O_WRONLY);
-            if (mq_temp != (mqd_t)-1) {
-                char reply[32];
-                snprintf(reply, sizeof(reply), "%d", i + 1);
-                mq_send(mq_temp, reply, strlen(reply) + 1, 0);
-                mq_close(mq_temp);
+        if (strncmp(buf, "JOIN ", 5) == 0) {
+            char tmp_q[128];
+            sscanf(buf + 5, "%127s", tmp_q);
+            mqd_t mq_tmp = mq_open(tmp_q, O_WRONLY);
+            if (mq_tmp != (mqd_t)-1) {
+                char id[4]; snprintf(id, 4, "%d", i + 1);
+                mq_send(mq_tmp, id, strlen(id) + 1, 0);
+                mq_close(mq_tmp);
             }
-            players[i].connected = 1;
             printf("[SERVER] Pemain %d terhubung.\n", i + 1);
         } else {
             i--;
         }
     }
+
     mq_close(mq_join);
-    mq_unlink(MQ_BS_JOIN);
+    mq_unlink(MQ_JOIN);
     printf("[SERVER] Kedua pemain terhubung. Permainan dimulai!\n");
-    srv_send(0, "GAME_START");
-    srv_send(1, "GAME_START");
+    send_to(0, "START");
+    send_to(1, "START");
 }
 ```
 
 - Code Lengkap (player.c bagian koneksi):
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <mqueue.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <ctype.h>
-
-#define MQ_BS_JOIN    "/mq_bs_join"
-#define MSG_SIZE      512
+```n#define MQ_JOIN "/bs_join"
+#define MQ_P1   "/bs_p1"
+#define MQ_P2   "/bs_p2"
+#define MQ_S1   "/bs_s1"
+#define MQ_S2   "/bs_s2"
+#define MSGSZ   256
 
 static mqd_t mq_out, mq_in;
-static int player_id;
+static int   player_id;
 
 int main(void) {
-    printf("[PEMAIN] Menghubungkan ke server...\n");
-
     pid_t pid = getpid();
-    char temp_q[128];
-    snprintf(temp_q, sizeof(temp_q), "/mq_bs_temp_%d", pid);
+    char  tmp_q[128];
+    snprintf(tmp_q, sizeof(tmp_q), "/bs_tmp_%d", (int)pid);
 
-    struct mq_attr attr = { .mq_flags = 0, .mq_maxmsg = 10,
-                            .mq_msgsize = MSG_SIZE, .mq_curmsgs = 0 };
-    mqd_t mq_temp = mq_open(temp_q, O_CREAT | O_RDONLY, 0666, &attr);
+    struct mq_attr attr = {0, 10, MSGSZ, 0};
+    mqd_t mq_tmp  = mq_open(tmp_q,  O_CREAT | O_RDONLY, 0666, &attr);
+    mqd_t mq_join = mq_open(MQ_JOIN, O_WRONLY);
 
-    mqd_t mq_join = mq_open(MQ_BS_JOIN, O_WRONLY);
-
-    char join_msg[MSG_SIZE];
-    snprintf(join_msg, sizeof(join_msg), "CONNECT %s", temp_q);
+    char join_msg[MSGSZ];
+    snprintf(join_msg, MSGSZ, "JOIN %s", tmp_q);
     mq_send(mq_join, join_msg, strlen(join_msg) + 1, 0);
     mq_close(mq_join);
 
-    char buf[MSG_SIZE];
-    memset(buf, 0, MSG_SIZE);
-    mq_receive(mq_temp, buf, MSG_SIZE, NULL);
+    char buf[MSGSZ * 2];
+    memset(buf, 0, sizeof(buf));
+    mq_receive(mq_tmp, buf, sizeof(buf), NULL);
     player_id = atoi(buf);
-    mq_close(mq_temp);
-    mq_unlink(temp_q);
+    mq_close(mq_tmp); mq_unlink(tmp_q);
 
     printf("[PEMAIN %d] Berhasil terhubung!\n", player_id);
+
+    mq_out = mq_open(player_id == 1 ? MQ_P1 : MQ_P2, O_WRONLY);
+    mq_in  = mq_open(player_id == 1 ? MQ_S1 : MQ_S2, O_RDONLY);
 }
 ```
 
 Penjelasan:
-```c
-#include <mqueue.h>
+```nstruct mq_attr attr = {0, 10, MSGSZ, 0};
 ```
-Pustaka `mqueue.h` merupakan pustaka POSIX Message Queue yang menyediakan API untuk komunikasi antar proses (IPC). Pustaka ini wajib digunakan dan saat kompilasi harus disertakan flag `-lrt`.
+Cara singkat menginisialisasi atribut antrean: `mq_flags=0`, `mq_maxmsg=10`, `mq_msgsize=MSGSZ`, `mq_curmsgs=0`. Antrean bisa menampung maksimal 10 pesan, masing-masing berukuran 256 byte.
 
-```c
-#define MQ_BS_JOIN    "/mq_bs_join"
-#define MQ_P1_TO_SRV  "/mq_bs_p1_srv"
-#define MQ_P2_TO_SRV  "/mq_bs_p2_srv"
-#define MQ_SRV_TO_P1  "/mq_bs_srv_p1"
-#define MQ_SRV_TO_P2  "/mq_bs_srv_p2"
+```nmq_unlink(MQ_JOIN); mq_unlink(MQ_P1); ...
 ```
-Mendefinisikan 5 nama antrean pesan POSIX. `MQ_BS_JOIN` adalah antrean publik untuk player mendaftar. Setelah mendaftar, komunikasi gameplay diteruskan lewat jalur privat: `MQ_P1_TO_SRV` dan `MQ_SRV_TO_P1` untuk Player 1, serta `MQ_P2_TO_SRV` dan `MQ_SRV_TO_P2` untuk Player 2. Nama-nama ini akan muncul di `/dev/mqueue/` pada sistem Linux.
+Menghapus sisa antrean dari eksekusi sebelumnya. POSIX Message Queue bersifat persisten di `/dev/mqueue/` sampai dihapus secara eksplisit.
 
-```c
-struct mq_attr attr = { .mq_flags = 0, .mq_maxmsg = 10, .mq_msgsize = MSG_SIZE, .mq_curmsgs = 0 };
+```nmq_in[0] = mq_open(MQ_P1, O_CREAT | O_RDONLY, 0666, &attr);
 ```
-Mendeklarasikan atribut antrean. `.mq_maxmsg = 10` berarti antrean bisa menampung maksimal 10 pesan sebelum penuh. `.mq_msgsize = MSG_SIZE` berarti setiap pesan berukuran maksimal 512 byte.
+Server membuka `MQ_P1` sebagai read-only (hanya menerima dari Player 1). Array `mq_in[2]` dan `mq_out[2]` mempermudah pengaksesan queue berdasarkan indeks pemain (0 atau 1).
 
-```c
-mq_unlink(MQ_BS_JOIN);
-mq_unlink(MQ_P1_TO_SRV); mq_unlink(MQ_P2_TO_SRV);
-mq_unlink(MQ_SRV_TO_P1); mq_unlink(MQ_SRV_TO_P2);
+```nchar tmp_q[128];
+snprintf(tmp_q, sizeof(tmp_q), "/bs_tmp_%d", (int)pid);
 ```
-Me-*reset* antrean yang mungkin masih menggantung dari eksekusi sebelumnya. Jika game dihentikan paksa, sistem operasi tidak secara otomatis menghapus Message Queue di `/dev/mqueue/`, sehingga pesan lama bisa tercampur. Fungsi `mq_unlink()` menghapus antrean tersebut.
+Setiap player membuat antrean sementara unik menggunakan PID prosesnya. Player mengirim nama antrean ini ke server lewat `Q_JOIN`, server membalas dengan ID pemain (`"1"` atau `"2"`) ke antrean sementara tersebut, lalu antrean dihapus.
 
-```c
-mq_in[0]  = mq_open(MQ_P1_TO_SRV, O_CREAT | O_RDONLY, 0666, &attr);
+```nmq_out = mq_open(player_id == 1 ? MQ_P1 : MQ_P2, O_WRONLY);
+mq_in  = mq_open(player_id == 1 ? MQ_S1 : MQ_S2, O_RDONLY);
 ```
-Membuka (atau membuat jika belum ada) antrean dengan `mq_open()`. Flag `O_CREAT` memerintahkan OS untuk membuat antrean baru, `O_RDONLY` artinya server hanya membaca dari antrean ini (player yang menulis). Permission `0666` memberikan akses baca-tulis untuk semua pengguna.
-
-```c
-for (int i = 0; i < 2; i++) {
-    mq_receive(mq_join, buf, MSG_SIZE, NULL);
-```
-Server melakukan *loop* menunggu 2 player bergabung. Fungsi `mq_receive()` bersifat *blocking* — artinya program akan berhenti di baris ini sampai ada pesan masuk di `mq_join`.
-
-```c
-if (strncmp(buf, "CONNECT ", 8) == 0) {
-```
-Server hanya merespons pesan yang diawali dengan `CONNECT`. Jika pesan tidak valid, `i--` memaksa iterasi diulang sehingga server terus menunggu sampai player yang sah terhubung.
-
-```c
-mqd_t mq_temp = mq_open(temp_q, O_WRONLY);
-snprintf(reply, sizeof(reply), "%d", i + 1);
-mq_send(mq_temp, reply, strlen(reply) + 1, 0);
-mq_close(mq_temp);
-```
-Server mengekstrak nama antrean sementara milik klien dari pesan `CONNECT`, membukanya, lalu mengirim balik ID pemain (`"1"` atau `"2"`). Setelah itu antrean sementara langsung ditutup karena komunikasi selanjutnya menggunakan jalur privat yang sudah disiapkan.
-
-```c
-// Di player.c:
-snprintf(temp_q, sizeof(temp_q), "/mq_bs_temp_%d", pid);
-```
-Setiap player membuat antrean sementara unik berdasarkan PID prosesnya. Ini memastikan dua player yang dijalankan bersamaan tidak bertabrakan. Player mengirim `"CONNECT /mq_bs_temp_12345"` ke server, lalu menunggu balasan berupa ID di antrean sementara tersebut.
-
-```c
-mq_close(mq_join);
-mq_unlink(MQ_BS_JOIN);
-```
-Setelah kedua player terhubung, antrean join ditutup dan dihapus karena tidak lagi dibutuhkan. Ini juga mencegah proses ketiga ikut bergabung ke sesi yang sudah berjalan.
+Setelah mendapat ID, player membuka queue privat yang sesuai untuk komunikasi selanjutnya.
 
 ---
 
 ## b. Penempatan Armada _(Fleet Placement)_
 ### Soal
-Setelah kedua pemain terhubung, masing-masing pemain menempatkan 2 kapalnya. Program meminta pemain memasukkan koordinat 1 petak per kapal. Koordinat harus valid (dalam batas papan) dan tidak menimpa kapal yang sudah ada.
+Setelah kedua pemain terhubung, masing-masing pemain menempatkan 2 kapalnya secara bergantian (Player 1 selesai dahulu, lalu Player 2). Koordinat harus valid dan tidak menimpa kapal yang sudah ada.
 
 ### Penyelesaian
 - Code Lengkap (server.c bagian penempatan):
-```c
-#define ROWS          4
-#define COLS          4
-#define MAX_SHIPS     2
-#define CELL_EMPTY   '.'
-#define CELL_SHIP    'S'
-
-typedef struct {
-    int  r, c;
-    int  sunk;
-    int  index;
-} Ship;
-
-typedef struct {
-    char board[ROWS][COLS];
-    char hit_board[ROWS][COLS];
-    Ship ships[MAX_SHIPS];
-    int  num_ships;
-    int  ships_remaining;
-    int  connected;
+```ntypedef struct {
+    char own[4][4];
+    char shot[4][4];
+    int  ships;
 } Player;
 
-static int place_ship(Player *p, int idx, int r, int c) {
-    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return -3;
-    if (p->board[r][c] != CELL_EMPTY) return -4;
-    Ship *s = &p->ships[p->num_ships];
-    s->r = r;  s->c = c;  s->sunk = 0;  s->index = idx;
-    p->board[r][c] = CELL_SHIP;
-    p->num_ships++;
-    p->ships_remaining++;
-    return 0;
-}
+static Player player[2];
 
-static void setup_player(int pid) {
-    Player *p = &players[pid];
-    char buf[MSG_SIZE];
-    for (int i = 1; i <= MAX_SHIPS; i++) {
+static void setup(int p) {
+    char buf[MSGSZ];
+    printf("[SERVER] Pemain %d sedang menempatkan armada...\n", p + 1);
+    for (int i = 1; i <= 2; i++) {
         while (1) {
-            srv_recv(pid, buf);
-            char coord_str[8];
-            if (sscanf(buf, "PLACE %s", coord_str) != 1) {
-                srv_send(pid, "PLACE_ERR Format tidak valid.");
+            recv_from(p, buf);
+            if (strncmp(buf, "PLACE ", 6) != 0) {
+                send_to(p, "ERR Format tidak valid.");
                 continue;
             }
-            int r = coord_str[0] - '0';
-            int c = col_to_idx(coord_str[1]);
-            if (r < 0 || r >= ROWS || c < 0 || c >= COLS) {
-                srv_send(pid, "PLACE_ERR Koordinat di luar batas!");
+            int row = buf[6] - '0';
+            int col = col_idx(buf[7]);
+            if (row < 0 || row > 3 || col < 0) {
+                send_to(p, "ERR Koordinat di luar batas!");
                 continue;
             }
-            int res = place_ship(p, i, r, c);
-            if (res == -3) {
-                srv_send(pid, "PLACE_ERR Koordinat di luar batas!");
-            } else if (res == -4) {
-                srv_send(pid, "PLACE_ERR Petak sudah ditempati!");
-            } else {
-                char ok[MSG_SIZE];
-                snprintf(ok, MSG_SIZE, "PLACE_OK Kapal %d ditempatkan.", i);
-                srv_send(pid, ok);
-                break;
+            if (player[p].own[row][col] != '.') {
+                send_to(p, "ERR Petak sudah ditempati!");
+                continue;
             }
-        }
-    }
-}
-```
-
-- Code Lengkap (player.c bagian penempatan):
-```c
-/* Show initial empty boards */
-printf("    Papan Lawan\n");
-printf("  A B C D\n");
-for (int r = 0; r < 4; r++) {
-    printf("%d|", r);
-    for (int c = 0; c < 4; c++)
-        printf("?|");
-    printf("\n");
-}
-printf("\n");
-printf("    Papan Anda\n");
-printf("  A B C D\n");
-for (int r = 0; r < 4; r++) {
-    printf("%d|", r);
-    for (int c = 0; c < 4; c++)
-        printf(" |");
-    printf("\n");
-}
-printf("\n");
-
-printf("Anda akan menempatkan 2 kapal (masing-masing 1 petak).\n\n");
-
-char input[100];
-for (int i = 1; i <= 2; i++) {
-    while (1) {
-        printf("Tempatkan Kapal %d:\n> ", i);
-        fgets(input, sizeof(input), stdin);
-        remove_newline(input);
-
-        char place_cmd[MSG_SIZE];
-        snprintf(place_cmd, sizeof(place_cmd), "PLACE %s", input);
-        mq_send(mq_out, place_cmd, strlen(place_cmd)+1, 0);
-
-        mq_receive(mq_in, buf, MSG_SIZE, NULL);
-        if (strncmp(buf, "PLACE_ERR", 9) == 0) {
-            printf("%s\n", buf + 10);
-        } else if (strncmp(buf, "PLACE_OK", 8) == 0) {
-            printf("%s\n", buf + 9);
+            player[p].own[row][col] = 'S';
+            player[p].ships++;
+            char ok[MSGSZ];
+            snprintf(ok, MSGSZ, "OK Kapal %d ditempatkan.", i);
+            send_to(p, ok);
             break;
         }
     }
 }
-printf("\n[INFO] Menunggu lawan menyelesaikan penempatan...\n");
+
+// Di main():
+setup(0);
+send_to(0, "WAIT_OPP");
+setup(1);
+send_to(0, "READY");
+send_to(1, "READY");
+```
+
+- Code Lengkap (player.c bagian penempatan):
+```nfor (int i = 1; i <= 2; i++) {
+    while (1) {
+        printf("Tempatkan Kapal %d:\n> ", i);
+        fflush(stdout);
+        if (fgets(input, sizeof(input), stdin) == NULL) continue;
+        strip(input);
+
+        char cmd[QSZ];
+        snprintf(cmd, QSZ, "PLACE %s", input);
+        mq_send(q_send, cmd, strlen(cmd) + 1, 0);
+
+        memset(buf, 0, sizeof(buf));
+        mq_receive(q_recv, buf, sizeof(buf), NULL);
+
+        if (strncmp(buf, "ERR ", 4) == 0) {
+            printf("%s\n", buf + 4);
+        } else if (strncmp(buf, "OK ", 3) == 0) {
+            printf("%s\n", buf + 3);
+            break;
+        }
+    }
+}
 ```
 
 Penjelasan:
-```c
-typedef struct {
-    char board[ROWS][COLS];
-    char hit_board[ROWS][COLS];
-    Ship ships[MAX_SHIPS];
-    int  num_ships;
-    int  ships_remaining;
-    int  connected;
+```ntypedef struct {
+    char own[4][4];
+    char shot[4][4];
+    int  ships;
 } Player;
 ```
-Struktur `Player` menyimpan seluruh state pemain. `board` adalah matriks 4x4 yang menyimpan posisi kapal (`S`) dan petak kosong (`.`). `hit_board` mencatat riwayat tembakan lawan pada papan pemain — `X` untuk kena, ` ` untuk meleset. `ships` menyimpan detail tiap kapal (posisi, status tenggelam). `ships_remaining` digunakan untuk menentukan kapan pemain kalah.
+Struct `Player` disederhanakan menjadi dua papan saja. `own[4][4]` menyimpan papan pemain sendiri dengan satu nilai per sel: `'.'` kosong belum ditembak, `'S'` kapal, `'X'` kapal terkena tembakan lawan, `' '` kosong ditembak lawan (meleset). `shot[4][4]` menyimpan semua tembakan yang sudah dilakukan pemain ini ke lawan: `'.'` belum tembak, `'X'` kena, `' '` meleset.
 
-```c
-static int col_to_idx(char c) {
-    if (c >= 'a' && c <= 'd') return c - 'a';
-    if (c >= 'A' && c <= 'D') return c - 'A';
-    return -1;
-}
+```nint r = buf[6] - '0';
+int c = col_idx(buf[7]);
 ```
-Fungsi utilitas untuk mengubah kolom huruf (`A`-`D`) menjadi indeks angka (`0`-`3`). Mendukung huruf besar maupun kecil sehingga pemain bisa mengetik `0a` maupun `0A`.
+Koordinat dikirim dalam format `"PLACE 2C"`. `buf[6]` adalah digit baris (`'0'`-`'3'`), `buf[7]` adalah huruf kolom (`'A'`-`'D'` atau `'a'`-`'d'`).
 
-```c
-static int place_ship(Player *p, int idx, int r, int c) {
-    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return -3;
-    if (p->board[r][c] != CELL_EMPTY) return -4;
+```nplayer[p].own[row][col] = 'S';
+player[p].ships++;
 ```
-Fungsi `place_ship()` memvalidasi koordinat sebelum menetapkan kapal. Return `-3` berarti koordinat di luar batas papan, dan `-4` berarti petak sudah ditempati kapal lain. Jika valid, kapal disiapkan pada array `ships` dan simbol `S` ditanam di `board[r][c]`.
+Menempatkan kapal langsung di papan `own`. Counter `ships` digunakan server untuk mendeteksi kapan semua kapal tenggelam.
 
-```c
-if (sscanf(buf, "PLACE %s", coord_str) != 1) {
-    srv_send(pid, "PLACE_ERR Format tidak valid.");
-    continue;
-}
+```nsetup(0);
+send_to(0, "WAIT_OPP");
+setup(1);
 ```
-Server menerima pesan mentah dari player (misalnya `"PLACE 0A"`). Fungsi `sscanf` mengekstrak bagian koordinat. Jika format tidak sesuai, server mengirim pesan error dan mengulang iterasi `while` agar player bisa mencoba lagi.
-
-```c
-// Di player.c:
-snprintf(place_cmd, sizeof(place_cmd), "PLACE %s", input);
-mq_send(mq_out, place_cmd, strlen(place_cmd)+1, 0);
-```
-Player membaca input dari `stdin` menggunakan `fgets()`, membentuk pesan `"PLACE 0A"`, lalu mengirimnya ke server via antrean `mq_out`. Setelah itu player menunggu respons `PLACE_OK` atau `PLACE_ERR` dari server.
+Player 1 selesai menempatkan kapal → server kirim `WAIT_OPP` → Player 1 tahu harus menunggu → server proses Player 2. Setelah keduanya selesai, server kirim `READY` ke kedua pemain.
 
 ---
 
 ## c. Giliran Bermain dan Penembakan _(Turn System and Firing)_
 ### Soal
-Setelah setup selesai, server menentukan pemain pertama secara acak. Setiap giliran, pemain melihat papan lawan (atas) dan papan sendiri (bawah), lalu mengetikkan koordinat target. Server memproses hasil tembakan dan mengirimkan notifikasi ke kedua pemain. Pemain dapat menembak petak yang sebelumnya sudah pernah ditembak, namun hasilnya selalu dianggap `MELESET`.
+Server menentukan pemain pertama secara acak. Setiap giliran, pemain melihat papan lawan (atas) dan papan sendiri (bawah), lalu mengetik koordinat target. Pemain yang sudah pernah menembak petak yang sama, hasilnya selalu `MELESET`.
 
 ### Penyelesaian
 - Code Lengkap (server.c bagian penembakan):
-```c
-static void process_fire(int shooter_pid) {
-    int target_pid = 1 - shooter_pid;
-    Player *target  = &players[target_pid];
-    char buf[MSG_SIZE];
+```nstatic void build_turn(int p, char *out) {
+    int n = sprintf(out, "TURN ");
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++)
+            out[n++] = player[p].own[r][c];
+    out[n++] = '|';
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++)
+            out[n++] = player[p].shot[r][c];
+    out[n] = '\0';
+}
 
+static void fire_round(int shooter) {
+    int target = 1 - shooter;
+    char buf[MSGSZ];
     while (1) {
-        srv_recv(shooter_pid, buf);
-        char coord_str[8];
-        if (sscanf(buf, "FIRE %s", coord_str) != 1) {
-            srv_send(shooter_pid, "FIRE_ERR Format tidak valid.");
-            continue;
+        recv_from(shooter, buf);
+        if (strncmp(buf, "FIRE ", 5) != 0) {
+            send_to(shooter, "ERR Format tidak valid."); continue;
         }
-        int r = coord_str[0] - '0';
-        int c = col_to_idx(coord_str[1]);
-        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) {
-            srv_send(shooter_pid, "FIRE_ERR Koordinat di luar batas!");
-            continue;
+        int row = buf[5] - '0';
+        int col = col_idx(buf[6]);
+        if (row < 0 || row > 3 || col < 0) {
+            send_to(shooter, "ERR Koordinat di luar batas!"); continue;
         }
 
-        int hit = 0, sunk = 0;
-        /* Already shot — always miss */
-        if (target->hit_board[r][c] == CELL_HIT || target->hit_board[r][c] == CELL_MISS) {
+        char coord[3] = {buf[5], buf[6], '\0'};
+        int hit = 0;
+
+        if (player[shooter].shot[row][col] != '.') {
             hit = 0;
-        } else if (target->board[r][c] == CELL_SHIP) {
+        } else if (player[target].own[row][col] == 'S') {
             hit = 1;
-            target->hit_board[r][c] = CELL_HIT;
-            for (int i = 0; i < target->num_ships; i++) {
-                if (target->ships[i].r == r && target->ships[i].c == c && !target->ships[i].sunk) {
-                    target->ships[i].sunk = 1;
-                    target->ships_remaining--;
-                    sunk = 1;
-                    break;
-                }
-            }
+            player[target].own[row][col]   = 'X';
+            player[shooter].shot[row][col] = 'X';
+            player[target].ships--;
         } else {
-            target->hit_board[r][c] = CELL_MISS;
+            if (player[target].own[row][col] == '.') player[target].own[row][col] = ' ';
+            player[shooter].shot[row][col] = ' ';
         }
 
-        printf("[GILIRAN] Pemain %d menembak %s: %s\n", shooter_pid + 1, coord_str, hit ? "KENA" : "MELESET");
-        if (sunk)
-            printf("[TENGGELAM] Pemain %d menenggelamkan Kapal Pemain %d!\n", shooter_pid + 1, target_pid + 1);
+        printf("[GILIRAN] Pemain %d menembak %s: %s\n", shooter+1, coord, hit?"KENA":"MELESET");
+        if (hit && player[target].ships == 0)
+            printf("[TENGGELAM] Pemain %d menenggelamkan Kapal Pemain %d!\n", shooter+1, target+1);
 
-        char res_msg[MSG_SIZE];
-        if (hit)
-            snprintf(res_msg, MSG_SIZE, "FIRE_RES %s KENA KAPAL, SISA %d KAPAL LAGI", coord_str, target->ships_remaining);
-        else
-            snprintf(res_msg, MSG_SIZE, "FIRE_RES %s MELESET, SISA %d KAPAL LAGI", coord_str, target->ships_remaining);
+        char res[MSGSZ];
+        snprintf(res, MSGSZ, "RES %s %s, SISA %d KAPAL LAGI",
+                 coord, hit ? "KENA KAPAL" : "MELESET", player[target].ships);
+        send_to(shooter, res);
 
-        snprintf(pending_opp_msg[target_pid], MSG_SIZE, "OPP_FIRE %s: %s, SISA %d KAPAL LAGI",
-                 coord_str, hit ? "KENA KAPAL" : "MELESET", target->ships_remaining);
-        has_pending_opp_msg[target_pid] = 1;
-        srv_send(shooter_pid, res_msg);
+        snprintf(opp_msg[target], MSGSZ, "OPP %s: %s, SISA %d KAPAL LAGI",
+                 coord, hit ? "KENA KAPAL" : "MELESET", player[target].ships);
+        has_opp[target] = 1;
         return;
     }
 }
@@ -440,24 +340,26 @@ static void run_game(void) {
     int current = rand() % 2;
     printf("[SERVER] Dipilih secara acak: Pemain %d bermain duluan.\n", current + 1);
 
+    char turn_buf[MSGSZ * 2], wait_buf[MSGSZ];
     while (1) {
         int other = 1 - current;
 
-        if (has_pending_opp_msg[current]) {
-            srv_send(current, pending_opp_msg[current]);
-            has_pending_opp_msg[current] = 0;
+        if (has_opp[current]) {
+            send_to(current, opp_msg[current]);
+            has_opp[current] = 0;
             usleep(50000);
         }
 
-        build_turn_msg(current, turn_msg, sizeof(turn_msg));
-        srv_send(current, turn_msg);
-        snprintf(wait_msg, sizeof(wait_msg), "WAIT Pemain %d sedang bermain...", current + 1);
-        srv_send(other, wait_msg);
-        process_fire(current);
+        build_turn(current, turn_buf);
+        send_to(current, turn_buf);
+        snprintf(wait_buf, MSGSZ, "WAIT Pemain %d sedang bermain...", current + 1);
+        send_to(other, wait_buf);
 
-        if (players[other].ships_remaining == 0) {
-            srv_send(current, "YOU_WIN");
-            srv_send(other,   "YOU_LOSE");
+        fire_round(current);
+
+        if (player[other].ships == 0) {
+            send_to(current, "WIN");
+            send_to(other,   "LOSE");
             printf("[SERVER] Pemain %d menang!\n", current + 1);
             break;
         }
@@ -467,280 +369,208 @@ static void run_game(void) {
 ```
 
 - Code Lengkap (player.c bagian menembak):
-```c
-// Dalam main loop setelah thread dibuat:
-while (!game_over) {
-    if (fgets(input, sizeof(input), stdin) != NULL) {
-        remove_newline(input);
-        pthread_mutex_lock(&console_mutex);
-        int is_turn = my_turn;
-        pthread_mutex_unlock(&console_mutex);
-
-        if (is_turn && strlen(input) > 0) {
-            pthread_mutex_lock(&console_mutex);
-            if (strlen(input) < 2) {
-                 printf("Format tidak valid!\nTarget: ");
-                 fflush(stdout);
-                 pthread_mutex_unlock(&console_mutex);
-                 continue;
-            }
-            char fire_cmd[MSG_SIZE];
-            snprintf(fire_cmd, sizeof(fire_cmd), "FIRE %s", input);
-            mq_send(mq_out, fire_cmd, strlen(fire_cmd)+1, 0);
-            my_turn = 0;
-            pthread_mutex_unlock(&console_mutex);
-        }
+```nwhile (!game_over) {
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        usleep(100000); continue;
     }
+    strip(input);
+
+    pthread_mutex_lock(&mutex);
+    int turn = my_turn;
+    pthread_mutex_unlock(&mutex);
+
+    if (!turn) continue;
+
+    if (strlen(input) < 2) {
+        pthread_mutex_lock(&mutex);
+        printf("Format tidak valid! Contoh: 2C\nTarget: ");
+        fflush(stdout);
+        pthread_mutex_unlock(&mutex);
+        continue;
+    }
+
+    pthread_mutex_lock(&mutex);
+    my_turn = 0;
+    pthread_mutex_unlock(&mutex);
+
+    char cmd[MSGSZ];
+    snprintf(cmd, MSGSZ, "FIRE %s", input);
+    mq_send(mq_out, cmd, strlen(cmd) + 1, 0);
 }
 ```
 
 Penjelasan:
-```c
-srand((unsigned)time(NULL));
-int current = rand() % 2;
+```nstatic void build_turn(int p, char *out) {
+    int n = sprintf(out, "TURN ");
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++)
+            out[n++] = pl[p].own[r][c];
+    out[n++] = '|';
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++)
+            out[n++] = pl[p].shot[r][c];
+    out[n] = '\0';
+}
 ```
-Server memilih pemain pertama secara acak menggunakan `rand() % 2`. Fungsi `srand()` menggunakan waktu saat ini sebagai seed agar hasil selalu berbeda setiap kali server dijalankan.
+Membangun pesan giliran: `"TURN <16 char own><|><16 char shot>"`. `own` sudah encoding seluruh state papan sendiri langsung (S/X/space/dot), `shot` encoding apa yang sudah ditembakkan ke lawan. Player hanya perlu memisahkan pada karakter `|`.
 
-```c
-build_turn_msg(current, turn_msg, sizeof(turn_msg));
-srv_send(current, turn_msg);
-```
-Fungsi `build_turn_msg()` menyusun string yang berisi data papan pemain sendiri dan papan lawan. String ini dikirim ke player yang sedang mendapat giliran. Player kemudian mem-*parse* string ini untuk menampilkan kedua papan di terminal.
-
-```c
-if (target->hit_board[r][c] == CELL_HIT || target->hit_board[r][c] == CELL_MISS) {
+```nif (pl[s].shot[r][c] != '.') {
     hit = 0;
 }
 ```
-Sebelum memproses tembakan baru, server mengecek apakah petak sudah pernah ditembak sebelumnya. Jika `hit_board` sudah berisi `CELL_HIT` atau `CELL_MISS`, tembakan ulang selalu dianggap meleset (`hit = 0`) tanpa mengubah state papan. Ini mencegah pemain mendapat hasil "KENA" pada kapal yang sudah tenggelam.
+Deteksi tembakan ulang menggunakan `shot` milik penembak, bukan papan lawan. Jika nilai bukan `'.'` (sudah pernah ditembak), hasilnya selalu miss tanpa mengubah state papan apapun.
 
-```c
-if (target->board[r][c] == CELL_SHIP) {
-    hit = 1;
-    target->hit_board[r][c] = CELL_HIT;
+```npl[t].own[r][c]  = 'X';
+pl[s].shot[r][c] = 'X';
+pl[t].ships--;
 ```
-Ketika koordinat tembakan mengenai petak yang berisi kapal (`CELL_SHIP` / `S`), server menandai `hit = 1` dan memperbarui `hit_board` lawan pada posisi tersebut menjadi `CELL_HIT` (`X`). Ini akan terlihat di papan "Papan Anda" milik lawan saat giliran berikutnya.
+Satu kali kena: papan lawan (`own`) diubah dari `'S'` ke `'X'`, papan `shot` penembak dicatat `'X'`, dan counter kapal lawan dikurangi.
 
-```c
-} else {
-    target->hit_board[r][c] = CELL_MISS;
-}
+```nsnprintf(opp[t], QSZ, "OPP %s: ...", coord, ...);
+has_opp[t] = 1;
 ```
-Jika tembakan meleset (petak kosong), `hit_board` diisi dengan `CELL_MISS` (spasi ` `). Sehingga lawan bisa melihat di mana musuhnya sudah pernah menembak dan meleset.
+Pesan notifikasi untuk lawan disimpan dulu di buffer `opp[]`, tidak langsung dikirim. Pesan ini baru dikirim di **awal giliran berikutnya** lawan (`has_opp` diperiksa di `run_game()`). Ini memastikan urutan tampilan di terminal lawan tetap rapi.
 
-```c
-for (int i = 0; i < target->num_ships; i++) {
-    if (target->ships[i].r == r && target->ships[i].c == c && !target->ships[i].sunk) {
-        target->ships[i].sunk = 1;
-        target->ships_remaining--;
-        sunk = 1;
-        break;
-    }
-}
+```nmyturn = 0;
+snprintf(cmd, QSZ, "FIRE %s", input);
+mq_send(q_send, cmd, strlen(cmd) + 1, 0);
 ```
-Setelah mendeteksi `hit`, server mencari kapal mana yang terkena di array `ships`. Kapal yang terkena ditandai `sunk = 1` dan `ships_remaining` dikurangi satu. Karena setiap kapal hanya berukuran 1 petak, satu kali kena langsung tenggelam.
-
-```c
-if (players[other].ships_remaining == 0) {
-    srv_send(current, "YOU_WIN");
-    srv_send(other,   "YOU_LOSE");
-```
-Setiap selesai memproses tembakan, server mengecek apakah semua kapal lawan sudah tenggelam. Jika `ships_remaining == 0`, server mengirim pesan kemenangan ke penembak dan kekalahan ke lawan, lalu keluar dari game loop.
-
-```c
-snprintf(pending_opp_msg[target_pid], MSG_SIZE, "OPP_FIRE %s: %s, SISA %d KAPAL LAGI",
-         coord_str, hit ? "KENA KAPAL" : "MELESET", target->ships_remaining);
-has_pending_opp_msg[target_pid] = 1;
-```
-Setelah memproses tembakan, server menyimpan pesan notifikasi untuk lawan di buffer `pending_opp_msg`. Pesan ini tidak langsung dikirim — server menggunakan mekanisme *deferred delivery* agar pesan `OPP_FIRE` dikirim di awal giliran berikutnya milik lawan. Flag `has_pending_opp_msg` menandai bahwa ada pesan tertunda.
-
-```c
-if (has_pending_opp_msg[current]) {
-    srv_send(current, pending_opp_msg[current]);
-    has_pending_opp_msg[current] = 0;
-    usleep(50000);
-}
-```
-Di awal setiap giliran dalam `run_game()`, server mengecek apakah ada pesan `OPP_FIRE` tertunda untuk pemain yang akan bermain. Jika ada, pesan dikirim terlebih dahulu sebelum data papan. `usleep(50000)` memberi jeda 50ms agar pesan tercetak berurutan di terminal player.
-
-```c
-// Di player.c:
-snprintf(fire_cmd, sizeof(fire_cmd), "FIRE %s", input);
-mq_send(mq_out, fire_cmd, strlen(fire_cmd)+1, 0);
-my_turn = 0;
-```
-Player membentuk pesan `"FIRE 2C"` dari input pengguna dan mengirimnya ke server. Variabel `my_turn` langsung di-set ke `0` agar player tidak bisa menembak lagi sebelum menerima giliran baru dari server.
+Flag `myturn` di-set `0` dulu sebelum mengirim perintah. Jika server membalas `ERR`, listener thread akan mengembalikan `myturn = 1` sehingga player bisa mencoba lagi.
 
 ---
 
 ## d. Pengelolaan Thread, Akhir Permainan, dan Pembersihan _(Thread Management, End of Game, and Cleanup)_
 ### Soal
-Program `player.c` harus menggunakan **thread** dan **mutex** untuk mengelola komunikasi secara bersamaan. Thread utama menangani input, thread terpisah mendengarkan pesan dari server. Mutex melindungi tampilan terminal agar tidak rusak akibat dua thread mencetak bersamaan.
-
-Permainan berakhir ketika semua kapal milik salah satu pemain berhasil ditenggelamkan. Server mengirimkan pesan kemenangan dan kekalahan ke masing-masing pemain.
-
-Pemenang:
-```text
-========================================
-[HASIL] Semua kapal musuh telah tenggelam!
-[HASIL] ANDA MENANG!
-========================================
-```
-
-Yang kalah:
-```text
-========================================
-[HASIL] Semua kapal Anda telah tenggelam.
-[HASIL] ANDA KALAH.
-========================================
-```
+`player.c` harus menggunakan **thread** dan **mutex**. Thread utama menangani input keyboard, thread `listener` menangani semua pesan masuk dari server secara asinkron. Mutex melindungi `stdout` dan variabel bersama.
 
 ### Penyelesaian
 - Code Lengkap (player.c bagian threading):
-```c
-static pthread_mutex_t console_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int game_over = 0;
-static int my_turn = 0;
+```nstatic pthread_mutex_t mutex     = PTHREAD_MUTEX_INITIALIZER;
+static volatile int    game_over = 0;
+static volatile int    my_turn   = 0;
 
-void* listener_thread(void* arg) {
-    char buf[MSG_SIZE];
-    while (!game_over) {
-        memset(buf, 0, MSG_SIZE);
-        if (mq_receive(mq_in, buf, MSG_SIZE, NULL) > 0) {
-            pthread_mutex_lock(&console_mutex);
-
-            if (strncmp(buf, "WAIT", 4) == 0) {
-                printf("\n[INFO] %s\n", buf + 5);
-                my_turn = 0;
-            }
-            else if (strncmp(buf, "YOUR_TURN", 9) == 0) {
-                my_turn = 1;
-                printf("\n========================================\n");
-                printf("[GILIRAN ANDA]\n\n");
-                // ... render papan lawan dan papan sendiri ...
-                printf("Target: ");
-                fflush(stdout);
-            }
-            else if (strncmp(buf, "FIRE_RES", 8) == 0) {
-                printf("\n[HASIL TEMBAKAN]\n");
-                printf("%s\n", buf + 9);
-                printf("========================================\n");
-                my_turn = 0;
-            }
-            else if (strncmp(buf, "OPP_FIRE", 8) == 0) {
-                printf("\n[INFO] Lawan menembak %s\n", buf + 9);
-            }
-            else if (strncmp(buf, "YOU_WIN", 7) == 0) {
-                printf("\n========================================\n");
-                printf("[HASIL] Semua kapal musuh telah tenggelam!\n");
-                printf("[HASIL] ANDA MENANG!\n");
-                printf("========================================\n");
-                game_over = 1;
-            }
-            else if (strncmp(buf, "YOU_LOSE", 8) == 0) {
-                printf("\n========================================\n");
-                printf("[HASIL] Semua kapal Anda telah tenggelam.\n");
-                printf("[HASIL] ANDA KALAH.\n");
-                printf("========================================\n");
-                game_over = 1;
-            }
-            pthread_mutex_unlock(&console_mutex);
+static void show_board(const char *board, int is_enemy) {
+    printf("  A B C D\n");
+    for (int r = 0; r < 4; r++) {
+        printf("%d|", r);
+        for (int c = 0; c < 4; c++) {
+            char ch = board[r * 4 + c];
+            printf("%c|", ch == '.' ? (is_enemy ? '?' : ' ') : ch);
         }
+        printf("\n");
+    }
+}
+
+static void *listener(void *arg) {
+    (void)arg;
+    char buf[MSGSZ * 2];
+    while (!game_over) {
+        memset(buf, 0, sizeof(buf));
+        if (mq_receive(mq_in, buf, sizeof(buf), NULL) < 0) {
+            if (game_over) break;
+            continue;
+        }
+        pthread_mutex_lock(&mutex);
+
+        if (strncmp(buf, "TURN ", 5) == 0) {
+            my_turn = 1;
+            char own[17]={0}, shot[17]={0};
+            char *sep = strchr(buf + 5, '|');
+            if (sep) {
+                int n = sep - (buf+5); if (n > 16) n = 16;
+                memcpy(own, buf+5, n);
+                memcpy(shot, sep+1, 16);
+            }
+            printf("\n========================================\n");
+            printf("[GILIRAN ANDA]\n\n");
+            printf("    Papan Lawan\n"); show_board(shot, 1);
+            printf("\n    Papan Anda\n"); show_board(own, 0);
+            printf("\nTarget: "); fflush(stdout);
+        }
+        else if (strncmp(buf, "RES ", 4) == 0) {
+            printf("\n[HASIL TEMBAKAN]\n%s\n========================================\n", buf+4);
+            fflush(stdout); my_turn = 0;
+        }
+        else if (strncmp(buf, "ERR ", 4) == 0) {
+            printf("\n%s\nTarget: ", buf+4); fflush(stdout); my_turn = 1;
+        }
+        else if (strncmp(buf, "OPP ", 4) == 0) {
+            printf("\n[INFO] Lawan menembak %s\n", buf+4); fflush(stdout);
+        }
+        else if (strcmp(buf, "WIN") == 0) {
+            printf("\n========================================\n");
+            printf("[HASIL] Semua kapal musuh telah tenggelam!\n[HASIL] ANDA MENANG!\n");
+            printf("========================================\n"); fflush(stdout);
+            game_over = 1; pthread_mutex_unlock(&mutex); break;
+        }
+        else if (strcmp(buf, "LOSE") == 0) {
+            printf("\n========================================\n");
+            printf("[HASIL] Semua kapal Anda telah tenggelam.\n[HASIL] ANDA KALAH.\n");
+            printf("========================================\n"); fflush(stdout);
+            game_over = 1; pthread_mutex_unlock(&mutex); break;
+        }
+        pthread_mutex_unlock(&mutex);
     }
     return NULL;
 }
 
 // Di main():
 pthread_t tid;
-pthread_create(&tid, NULL, listener_thread, NULL);
-// ... main loop fgets ...
+pthread_create(&tid, NULL, listener, NULL);
+// ... main loop ...
 pthread_join(tid, NULL);
 mq_close(mq_in);
 mq_close(mq_out);
 ```
 
-- Code Lengkap (server.c bagian build_turn_msg dan cleanup):
-```c
-static void build_turn_msg(int pid, char *out, size_t osz) {
-    Player *p = &players[pid];
-    int n = 0;
-    n += snprintf(out + n, osz - n, "YOUR_TURN ");
-    for (int r = 0; r < ROWS; r++) {
-        for (int c = 0; c < COLS; c++) {
-            char cell = p->board[r][c];
-            if (p->hit_board[r][c] == CELL_HIT) cell = CELL_HIT;
-            else if (p->hit_board[r][c] == CELL_MISS) cell = CELL_MISS;
-            out[n++] = cell;
-        }
-    }
-    out[n++] = '|';
-    Player *opp = &players[1 - pid];
-    for (int r = 0; r < ROWS; r++)
-        for (int c = 0; c < COLS; c++)
-            out[n++] = opp->hit_board[r][c];
-    out[n++] = '|';
-    out[n] = '\0';
-}
-
-static void cleanup(void) {
-    mq_close(mq_in[0]);  mq_unlink(MQ_P1_TO_SRV);
-    mq_close(mq_in[1]);  mq_unlink(MQ_P2_TO_SRV);
-    mq_close(mq_out[0]); mq_unlink(MQ_SRV_TO_P1);
-    mq_close(mq_out[1]); mq_unlink(MQ_SRV_TO_P2);
+- Code Lengkap (server.c bagian cleanup):
+```nstatic void cleanup(void) {
+    mq_close(qin[0]);  mq_unlink(Q_P1);
+    mq_close(qin[1]);  mq_unlink(Q_P2);
+    mq_close(qout[0]); mq_unlink(Q_S1);
+    mq_close(qout[1]); mq_unlink(Q_S2);
     printf("[SERVER] Pembersihan selesai. Sampai jumpa.\n");
 }
 ```
 
 Penjelasan:
-```c
-#include <pthread.h>
+```nstatic volatile int game_over = 0;
+static volatile int my_turn   = 0;
 ```
-Pustaka `pthread.h` menyediakan API untuk multithreading (POSIX Threads). Saat kompilasi harus disertakan flag `-lpthread`. Library ini dibutuhkan agar player bisa menerima pesan dari server secara asinkron sementara tetap menunggu input dari pengguna.
+`volatile` memastikan compiler tidak meng-cache nilai di register. Karena dua thread mengakses variabel ini bersamaan, setiap akses harus selalu membaca nilai terbaru dari memori.
 
-```c
-static pthread_mutex_t console_mutex = PTHREAD_MUTEX_INITIALIZER;
-```
-Mendeklarasikan mutex global yang diinisialisasi secara statis. Mutex ini berfungsi sebagai kunci untuk melindungi akses ke `stdout`. Tanpa mutex, ketika thread listener mencetak pesan (misalnya "[INFO] Lawan menembak 2C") bersamaan dengan thread utama mencetak prompt input, output di terminal bisa berantakan dan tidak terbaca.
-
-```c
-pthread_create(&tid, NULL, listener_thread, NULL);
-```
-Membuat thread baru yang menjalankan fungsi `listener_thread()`. Thread ini berjalan paralel dengan thread utama. Thread utama menangani `fgets()` (blocking I/O keyboard), sementara thread listener menangani `mq_receive()` (blocking I/O antrean pesan). Karena keduanya bersifat blocking, mereka harus berjalan di thread terpisah agar sistem tetap responsif.
-
-```c
-pthread_mutex_lock(&console_mutex);
-// ... printf, fflush ...
-pthread_mutex_unlock(&console_mutex);
-```
-Sebelum mencetak apapun ke terminal, thread harus mengunci mutex terlebih dahulu (`lock`). Setelah pencetakan selesai, mutex dilepas (`unlock`). Ini memastikan hanya satu thread yang bisa menulis ke `stdout` pada satu waktu, sehingga output papan dan pesan tidak tercampur.
-
-```c
-if (strncmp(buf, "YOUR_TURN", 9) == 0) {
-    my_turn = 1;
-```
-Ketika server mengirim pesan diawali `YOUR_TURN`, listener thread mendeteksinya, menetapkan flag `my_turn = 1`, dan mencetak tampilan papan beserta prompt. Thread utama yang sedang menunggu `fgets()` memeriksa flag ini — jika `my_turn == 1` dan ada input, input dikirim sebagai tembakan.
-
-```c
-else if (strncmp(buf, "OPP_FIRE", 8) == 0) {
-    printf("\n[INFO] Lawan menembak %s\n", buf + 9);
+```nstatic void show_board(const char *board, int is_enemy) {
+    char ch = board[r * 4 + c];
+    printf("%c|", ch == '.' ? (is_enemy ? '?' : ' ') : ch);
 }
 ```
-Ketika server memberitahu bahwa lawan sudah menembak, listener thread langsung menampilkannya di terminal secara real-time. Berkat mutex, pesan ini tidak akan rusak meskipun thread utama sedang menunggu input.
+Satu fungsi untuk menampilkan kedua papan. Logika sederhana: jika sel `'.'` (belum ditembak), tampilkan `'?'` untuk papan lawan atau `' '` untuk papan sendiri. Karakter lain (`S`, `X`, ` `) tampil apa adanya.
 
-```c
-static void build_turn_msg(int pid, char *out, size_t osz) {
+```nelse if (strncmp(buf, "TURN ", 5) == 0) {
+    char *sep = strchr(buf + 5, '|');
+    int n = sep - (buf + 5); if (n > 16) n = 16;
+    memcpy(own, buf + 5, n);
+    memcpy(shot, sep + 1, 16);
+}
 ```
-Fungsi ini membangun satu string besar yang berisi data papan pemain dan papan lawan. Format data adalah: `YOUR_TURN <16 char papan sendiri>|<16 char papan lawan>|`. Player mem-*parse* string ini di sisi klien untuk menampilkan dua papan terpisah. Pada papan sendiri, jika `hit_board` menunjukkan `CELL_HIT` maka ditampilkan `X`, jika `CELL_MISS` maka ditampilkan ` ` (spasi), menandakan di mana lawan sudah pernah menembak.
+Parsing pesan `TURN` menjadi dua papan 16 karakter. Pemisah `|` membatasi `own` (papan sendiri) dan `shot` (tembakan ke lawan). `own` dikirim ke `show_board(..., 0)` dan `shot` ke `show_board(..., 1)`.
 
-```c
-static void cleanup(void) {
-    mq_close(mq_in[0]);  mq_unlink(MQ_P1_TO_SRV);
+```nelse if (strncmp(buf, "ERR ", 4) == 0) {
+    printf("\n%s\nTarget: ", buf+4); fflush(stdout);
+    my_turn = 1;
+}
 ```
-Fungsi pembersihan menutup semua antrean pesan (`mq_close`) dan menghapusnya dari sistem (`mq_unlink`). Ini penting untuk memastikan tidak ada sumber daya IPC yang bocor setelah permainan berakhir. Tanpa pembersihan, antrean lama akan tetap ada di `/dev/mqueue/` dan bisa mengganggu eksekusi berikutnya.
+Jika server menolak tembakan, listener menampilkan pesan error, kembali mencetak `Target:`, dan mengembalikan `myturn = 1` agar main thread bisa mengirim ulang.
 
-```c
-pthread_join(tid, NULL);
-mq_close(mq_in);
-mq_close(mq_out);
+```ngame_over = 1;
+pthread_mutex_unlock(&mutex);
+break;
 ```
-Di sisi player, `pthread_join()` memastikan thread utama menunggu listener thread selesai sebelum menutup antrean. Ini mencegah situasi di mana antrean ditutup sementara listener thread masih mencoba membaca dari antrean tersebut.
+Saat game berakhir (`WIN`/`LOSE`), listener set `done = 1`, lepas mutex, lalu keluar dari loop dengan `break`. Ini menghindari thread terblokir pada `mq_receive()` berikutnya. Main thread membaca `done` dan juga keluar, lalu `pthread_join()` menunggu listener selesai sebelum menutup queue.
+
+```nstatic void cleanup(void) {
+    mq_close(qin[0]); mq_unlink(Q_P1);
+    ...
+}
+```
+`mq_close()` menutup file descriptor queue. `mq_unlink()` menghapus queue dari sistem (`/dev/mqueue/`). Keduanya diperlukan agar tidak ada kebocoran IPC setelah game selesai.
