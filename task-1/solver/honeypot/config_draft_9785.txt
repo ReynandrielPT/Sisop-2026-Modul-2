@@ -1,0 +1,3 @@
+[NOISE FILE]
+Filename: config_draft.txt
+This is a decoy file.

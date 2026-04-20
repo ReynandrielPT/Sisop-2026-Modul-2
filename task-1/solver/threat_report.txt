@@ -1,0 +1,16 @@
+Laporan Klasifikasi Serangan:
+1. Phishing muncul sebanyak 2551 kali.
+2. Ransomware muncul sebanyak 1710 kali.
+3. Malware muncul sebanyak 1314 kali.
+4. Bruteforce muncul sebanyak 1036 kali.
+5. SQLInjection muncul sebanyak 828 kali.
+6. PortScan muncul sebanyak 684 kali.
+7. DDoS muncul sebanyak 265 kali.
+8. XSS muncul sebanyak 166 kali.
+
+Top 5 IP Mencurigakan:
+1. 202.111.175.31 muncul sebanyak 884 kali.
+2. 103.43.118.200 muncul sebanyak 876 kali.
+3. 176.31.182.86 muncul sebanyak 841 kali.
+4. 192.162.240.162 muncul sebanyak 839 kali.
+5. 5.79.75.135 muncul sebanyak 804 kali.
