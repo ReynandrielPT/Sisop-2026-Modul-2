@@ -1,0 +1,8 @@
+task-1/**/*.log
+task-1/**/*.pcap
+task-1/**/*.sh
+task-1/**/*.exe
+task-1/**/*.txt
+task-1/**/*.bin
+
+.vscode/*

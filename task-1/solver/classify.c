@@ -1,96 +1,127 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
-#define MAX_TYPES 64
-#define MAX_NAME  128
-#define LOGS_DIR  "logs_dump"
+#define MAX_TYPES  64
+#define MAX_NAME   256
+#define LOGS_DIR   "logs_dump"
 
-static char types[MAX_TYPES][MAX_NAME];
-static int  type_count = 0;
+// ── Struktur untuk menyimpan jenis serangan unik ──────────────────────────
+char attack_types[MAX_TYPES][MAX_NAME];
+int  type_count = 0;
 
-static int find_type(const char *name) {
-    for (int i = 0; i < type_count; i++)
-        if (strcmp(types[i], name) == 0) return i;
-    return -1;
-}
-
-static void add_type(const char *name) {
-    if (find_type(name) < 0 && type_count < MAX_TYPES)
-        strncpy(types[type_count++], name, MAX_NAME - 1);
-}
-
-static void move_files(const char *type) {
-    char dest[256];
-    snprintf(dest, sizeof(dest), "%s/%s", LOGS_DIR, type);
-    mkdir(dest, 0755);
-
-    DIR *dir = opendir(LOGS_DIR);
-    if (!dir) { perror("opendir"); return; }
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type != DT_REG) continue;
-
-        char *under = strchr(entry->d_name, '_');
-        if (!under) continue;
-
-        int tlen = under - entry->d_name;
-        char found[MAX_NAME];
-        strncpy(found, entry->d_name, tlen);
-        found[tlen] = '\0';
-
-        if (strcmp(found, type) != 0) continue;
-
-        char src_path[512], dst_path[512];
-        snprintf(src_path, sizeof(src_path), "%s/%s", LOGS_DIR, entry->d_name);
-        snprintf(dst_path, sizeof(dst_path), "%s/%s/%s", LOGS_DIR, type, entry->d_name);
-        rename(src_path, dst_path);
+// Cek apakah jenis serangan sudah ada di array
+int already_exists(const char *type) {
+    for (int i = 0; i < type_count; i++) {
+        if (strcmp(attack_types[i], type) == 0) return 1;
     }
-    closedir(dir);
+    return 0;
 }
 
-int main(void) {
-    DIR *dir = opendir(LOGS_DIR);
+// Ekstrak jenis serangan dari nama file
+// Format: [Jenis Serangan]_[IP]_[Timestamp].log
+// Ambil bagian sebelum underscore pertama
+void extract_attack_type(const char *filename, char *out) {
+    strncpy(out, filename, MAX_NAME - 1);
+    out[MAX_NAME - 1] = '\0';
+    char *underscore = strchr(out, '_');
+    if (underscore) *underscore = '\0';
+}
+
+int main() {
+    DIR    *dir;
+    struct dirent *entry;
+    char   attack[MAX_NAME];
+
+    // ── Langkah 1: Scan logs_dump dan kumpulkan jenis serangan unik ───────
+    dir = opendir(LOGS_DIR);
     if (!dir) {
-        perror("opendir logs_dump");
-        return 1;
+        perror("opendir gagal");
+        exit(EXIT_FAILURE);
     }
 
-    struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
+        // Lewati entry bukan file reguler dan file tersembunyi
         if (entry->d_type != DT_REG) continue;
+        if (entry->d_name[0] == '.') continue;
+        // Hanya proses file .log
+        if (!strstr(entry->d_name, ".log")) continue;
 
-        char *under = strchr(entry->d_name, '_');
-        if (!under) continue;
+        extract_attack_type(entry->d_name, attack);
 
-        int tlen = under - entry->d_name;
-        char type[MAX_NAME];
-        strncpy(type, entry->d_name, tlen);
-        type[tlen] = '\0';
-        add_type(type);
+        if (!already_exists(attack) && type_count < MAX_TYPES) {
+            strncpy(attack_types[type_count], attack, MAX_NAME - 1);
+            type_count++;
+            printf("[INFO] Jenis serangan ditemukan: %s\n", attack);
+        }
     }
     closedir(dir);
 
-    pid_t pids[MAX_TYPES];
+    if (type_count == 0) {
+        printf("Tidak ada file log ditemukan.\n");
+        return 0;
+    }
+
+    // ── Langkah 2: Buat satu child process per jenis serangan unik ────────
+    // Setiap child bertanggung jawab memindahkan file milik satu jenis serangan
     for (int i = 0; i < type_count; i++) {
         pid_t pid = fork();
-        if (pid < 0) { perror("fork"); continue; }
-        if (pid == 0) {
-            move_files(types[i]);
-            printf("[Child] Selesai mengelompokkan: %s\n", types[i]);
-            exit(0);
+
+        if (pid < 0) {
+            perror("fork gagal");
+            exit(EXIT_FAILURE);
         }
-        pids[i] = pid;
+
+        if (pid == 0) {
+            // ── Child process ──────────────────────────────────────────────
+            char dest_dir[MAX_NAME * 2];
+            snprintf(dest_dir, sizeof(dest_dir), "%s/%s", LOGS_DIR, attack_types[i]);
+
+            // Buat subfolder jika belum ada
+            mkdir(dest_dir, 0755);
+
+            // Scan ulang dan pindahkan semua file milik jenis ini
+            DIR *cdir = opendir(LOGS_DIR);
+            if (!cdir) {
+                perror("opendir child gagal");
+                exit(EXIT_FAILURE);
+            }
+
+            struct dirent *centry;
+            char src_path[MAX_NAME * 4];
+            char dst_path[MAX_NAME * 4];
+            char file_type[MAX_NAME];
+
+            while ((centry = readdir(cdir)) != NULL) {
+                if (centry->d_type != DT_REG) continue;
+                if (centry->d_name[0] == '.') continue;
+                if (!strstr(centry->d_name, ".log")) continue;
+
+                extract_attack_type(centry->d_name, file_type);
+
+                if (strcmp(file_type, attack_types[i]) == 0) {
+                    snprintf(src_path, sizeof(src_path), "%s/%s", LOGS_DIR, centry->d_name);
+                    snprintf(dst_path, sizeof(dst_path), "%s/%s", dest_dir, centry->d_name);
+                    rename(src_path, dst_path);
+                }
+            }
+            closedir(cdir);
+
+            printf("[Child PID %d] Selesai memindahkan file: %s\n", getpid(), attack_types[i]);
+            exit(EXIT_SUCCESS);
+        }
+        // Parent tidak menunggu di sini — biarkan semua child jalan paralel
     }
 
-    for (int i = 0; i < type_count; i++)
-        waitpid(pids[i], NULL, 0);
+    // ── Langkah 3: Parent tunggu semua child selesai ──────────────────────
+    for (int i = 0; i < type_count; i++) {
+        wait(NULL);
+    }
 
-    printf("[Info] Klasifikasi selesai. %d jenis serangan ditemukan.\n", type_count);
+    printf("[OK] Klasifikasi selesai. %d kategori dibuat.\n", type_count);
     return 0;
 }

@@ -1,0 +1,23 @@
+
+[2026-04-19 18:18:53] Daemon watcher dimulai.
+[2026-04-19 18:19:32] Peringatan! Menemukan file mencurigakan: shell32_9935.exe
+[2026-04-19 18:19:32] Berhasil mengkarantina file: shell32_9935.exe
+[2026-04-19 18:19:34] Peringatan! Menemukan file mencurigakan: capture_traffic_1488.pcap
+[2026-04-19 18:19:34] Berhasil mengkarantina file: capture_traffic_1488.pcap
+[2026-04-19 18:19:36] Peringatan! Menemukan file mencurigakan: exploit_1434.exe
+[2026-04-19 18:19:36] Berhasil mengkarantina file: exploit_1434.exe
+[2026-04-19 18:19:38] Peringatan! Menemukan file mencurigakan: credentials_sniff_8359.pcap
+[2026-04-19 18:19:38] Berhasil mengkarantina file: credentials_sniff_8359.pcap
+[2026-04-19 18:19:40] Peringatan! Menemukan file mencurigakan: updater_fake_3615.exe
+[2026-04-19 18:19:40] Berhasil mengkarantina file: updater_fake_3615.exe
+[2026-04-19 18:19:44] Peringatan! Menemukan file mencurigakan: network_dump_2519.pcap
+[2026-04-19 18:19:44] Berhasil mengkarantina file: network_dump_2519.pcap
+[2026-04-19 18:19:46] Peringatan! Menemukan file mencurigakan: c2_traffic_5333.pcap
+[2026-04-19 18:19:46] Berhasil mengkarantina file: c2_traffic_5333.pcap
+[2026-04-19 18:19:50] Peringatan! Menemukan file mencurigakan: network_dump_5803.pcap
+[2026-04-19 18:19:50] Berhasil mengkarantina file: network_dump_5803.pcap
+[2026-04-19 18:19:58] Peringatan! Menemukan file mencurigakan: session_hijack_7065.pcap
+[2026-04-19 18:19:58] Berhasil mengkarantina file: session_hijack_7065.pcap
+[2026-04-19 18:20:18] Daemon dihentikan.
+[2026-04-19 18:21:47] Daemon watcher dimulai.
+[2026-04-19 18:26:04] Daemon dihentikan.

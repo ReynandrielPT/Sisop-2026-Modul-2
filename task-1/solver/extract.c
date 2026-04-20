@@ -1,37 +1,60 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <sys/stat.h>
 
-int main(void) {
-    mkdir("logs_dump", 0755);
+int main() {
+    pid_t pid;
+    int status;
 
-    pid_t pid = fork();
+    // ── Langkah 1: Ekstrak evidence.zip ke logs_dump ──────────────────────
+    // fork() membuat child process untuk menjalankan unzip
+    pid = fork();
     if (pid < 0) {
-        perror("fork");
-        return 1;
+        perror("fork gagal");
+        exit(EXIT_FAILURE);
     }
 
     if (pid == 0) {
+        // Child process: jalankan unzip
+        // unzip -o  : overwrite tanpa tanya
+        // -d        : tentukan direktori tujuan
         execlp("unzip", "unzip", "-o", "evidence.zip", "-d", "logs_dump", NULL);
-        perror("execlp unzip");
-        exit(1);
+        // Jika execlp gagal
+        perror("execlp unzip gagal");
+        exit(EXIT_FAILURE);
     }
 
-    int status;
+    // Parent process: tunggu child selesai sebelum lanjut (SEKUENSIAL)
     waitpid(pid, &status, 0);
-
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        if (remove("evidence.zip") == 0)
-            printf("[Info] evidence.zip berhasil dihapus.\n");
-        else
-            perror("remove");
-    } else {
-        fprintf(stderr, "[Error] Ekstraksi gagal.\n");
-        return 1;
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "Ekstraksi gagal dengan kode: %d\n", WEXITSTATUS(status));
+        exit(EXIT_FAILURE);
     }
+    printf("[OK] Ekstraksi selesai.\n");
+
+    // ── Langkah 2: Hapus evidence.zip ─────────────────────────────────────
+    // fork() lagi untuk menjalankan rm
+    pid = fork();
+    if (pid < 0) {
+        perror("fork gagal");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid == 0) {
+        // Child process: hapus file zip
+        execlp("rm", "rm", "evidence.zip", NULL);
+        perror("execlp rm gagal");
+        exit(EXIT_FAILURE);
+    }
+
+    // Parent tunggu penghapusan selesai
+    waitpid(pid, &status, 0);
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "Penghapusan gagal dengan kode: %d\n", WEXITSTATUS(status));
+        exit(EXIT_FAILURE);
+    }
+    printf("[OK] evidence.zip berhasil dihapus.\n");
 
     return 0;
 }

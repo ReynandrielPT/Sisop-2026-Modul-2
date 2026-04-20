@@ -1,98 +1,143 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <dirent.h>
 #include <time.h>
 #include <fcntl.h>
 
-#define HONEYPOT   "honeypot"
-#define QUARANTINE "quarantine"
-#define PID_FILE   "watcher.pid"
-#define LOG_FILE   "security.log"
+#define HONEYPOT_DIR  "honeypot"
+#define QUARANTINE_DIR "quarantine"
+#define PID_FILE      "watcher.pid"
+#define LOG_FILE      "security.log"
 
-static FILE *log_fp = NULL;
+// File log dibuat global agar bisa ditutup oleh signal handler
+FILE *log_fp = NULL;
 
-static void log_write(const char *msg) {
+// ── Tulis timestamp ke security.log ──────────────────────────────────────
+void write_log(const char *message) {
     if (!log_fp) return;
+
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
-    fprintf(log_fp, "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
-            t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-            t->tm_hour, t->tm_min, t->tm_sec, msg);
-    fflush(log_fp);
+    char timestamp[32];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", t);
+
+    fprintf(log_fp, "[%s] %s\n", timestamp, message);
+    fflush(log_fp); // pastikan langsung ditulis ke disk
 }
 
-static void on_sigterm(int sig) {
+// ── Signal handler untuk SIGTERM ─────────────────────────────────────────
+// Dipanggil saat: kill $(cat watcher.pid)
+void handle_sigterm(int sig) {
     (void)sig;
+    write_log("Daemon dihentikan.");
+
     if (log_fp) fclose(log_fp);
+
+    // Hapus PID file saat keluar
     remove(PID_FILE);
-    exit(0);
+    exit(EXIT_SUCCESS);
 }
 
-static int bad_ext(const char *name) {
-    const char *dot = strrchr(name, '.');
-    if (!dot) return 0;
-    return (strcmp(dot, ".exe") == 0 || strcmp(dot, ".pcap") == 0);
-}
+// ── Proses daemonisasi ────────────────────────────────────────────────────
+void daemonize() {
+    pid_t pid;
 
-int main(void) {
-    pid_t pid = fork();
-    if (pid < 0) { perror("fork"); return 1; }
-    if (pid > 0) exit(0);
+    // Fork pertama: parent keluar, child lanjut
+    pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);
+    if (pid > 0) exit(EXIT_SUCCESS); // parent exit
 
-    setsid();
+    // Buat sesi baru — lepas dari terminal
+    if (setsid() < 0) exit(EXIT_FAILURE);
 
-    pid_t pid2 = fork();
-    if (pid2 < 0) exit(1);
-    if (pid2 > 0) exit(0);
+    // Fork kedua: pastikan daemon tidak bisa mendapat terminal lagi
+    pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);
+    if (pid > 0) exit(EXIT_SUCCESS);
 
-    umask(0);
-    chdir("/");
-
+    // Tutup stdin, stdout, stderr
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-    open("/dev/null", O_RDONLY);
-    open("/dev/null", O_WRONLY);
-    open("/dev/null", O_WRONLY);
 
-    FILE *pidf = fopen(PID_FILE, "w");
-    if (pidf) { fprintf(pidf, "%d\n", getpid()); fclose(pidf); }
+    // Arahkan fd 0/1/2 ke /dev/null agar tidak error jika ada yang menulis
+    int devnull = open("/dev/null", O_RDWR);
+    dup2(devnull, STDIN_FILENO);
+    dup2(devnull, STDOUT_FILENO);
+    dup2(devnull, STDERR_FILENO);
+    close(devnull);
+}
 
+int main() {
+    // ── Daemonisasi ───────────────────────────────────────────────────────
+    daemonize();
+
+    // ── Daftarkan signal handler SIGTERM ──────────────────────────────────
+    struct sigaction sa;
+    sa.sa_handler = handle_sigterm;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGTERM, &sa, NULL);
+
+    // ── Buat folder honeypot dan quarantine jika belum ada ────────────────
+    mkdir(HONEYPOT_DIR,   0755);
+    mkdir(QUARANTINE_DIR, 0755);
+
+    // ── Simpan PID ke watcher.pid ─────────────────────────────────────────
+    FILE *pid_fp = fopen(PID_FILE, "w");
+    if (pid_fp) {
+        fprintf(pid_fp, "%d\n", getpid());
+        fclose(pid_fp);
+    }
+
+    // ── Buka file log ─────────────────────────────────────────────────────
     log_fp = fopen(LOG_FILE, "a");
+    if (!log_fp) exit(EXIT_FAILURE);
 
-    signal(SIGTERM, on_sigterm);
+    write_log("Daemon watcher dimulai.");
 
-    mkdir(HONEYPOT,   0755);
-    mkdir(QUARANTINE, 0755);
-
-    char msg[512];
+    // ── Loop utama: polling setiap 1 detik ────────────────────────────────
     while (1) {
-        DIR *dir = opendir(HONEYPOT);
-        if (dir) {
-            struct dirent *entry;
-            while ((entry = readdir(dir)) != NULL) {
-                if (entry->d_type != DT_REG) continue;
-                if (!bad_ext(entry->d_name)) continue;
-
-                snprintf(msg, sizeof(msg),
-                         "Peringatan! Menemukan file mencurigakan: %s", entry->d_name);
-                log_write(msg);
-
-                char src[512], dst[512];
-                snprintf(src, sizeof(src), "%s/%s", HONEYPOT, entry->d_name);
-                snprintf(dst, sizeof(dst), "%s/%s", QUARANTINE, entry->d_name);
-                rename(src, dst);
-
-                snprintf(msg, sizeof(msg),
-                         "Berhasil mengkarantina file: %s", entry->d_name);
-                log_write(msg);
-            }
-            closedir(dir);
+        DIR *dir = opendir(HONEYPOT_DIR);
+        if (!dir) {
+            sleep(1);
+            continue;
         }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type != DT_REG) continue;
+
+            char *fname = entry->d_name;
+            char *dot   = strrchr(fname, '.');
+            if (!dot) continue;
+
+            // Cek ekstensi .exe atau .pcap
+            if (strcmp(dot, ".exe") != 0 && strcmp(dot, ".pcap") != 0) continue;
+
+            // Bangun path sumber dan tujuan
+            char src[512], dst[512], log_msg[512];
+            snprintf(src, sizeof(src), "%s/%s", HONEYPOT_DIR, fname);
+            snprintf(dst, sizeof(dst), "%s/%s", QUARANTINE_DIR, fname);
+
+            // Catat penemuan
+            snprintf(log_msg, sizeof(log_msg),
+                     "Peringatan! Menemukan file mencurigakan: %s", fname);
+            write_log(log_msg);
+
+            // Pindahkan file ke quarantine
+            if (rename(src, dst) == 0) {
+                snprintf(log_msg, sizeof(log_msg),
+                         "Berhasil mengkarantina file: %s", fname);
+                write_log(log_msg);
+            }
+        }
+        closedir(dir);
         sleep(1);
     }
 
